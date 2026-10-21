@@ -2,6 +2,7 @@
 
 use crate::apps::split_command;
 use crate::leftovers::{Kind, Leftover};
+use crate::backup;
 use crate::procs::{self, Proc};
 use crate::reg::{self, wide, Hive, View};
 use std::os::windows::process::CommandExt;
@@ -142,26 +143,10 @@ pub struct Report {
     pub backup: PathBuf,
 }
 
-pub fn backup_root() -> PathBuf {
-    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    base.join("Tracewipe").join("backups")
-}
-
-fn stamp() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    secs.to_string()
-}
-
-fn safe_name(s: &str) -> String {
-    let s: String = s.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
-    s.trim().chars().take(60).collect()
-}
-
-/// Removes the selected traces. Files go to the Recycle Bin, registry keys
-/// and tasks are written to the backup folder before they are deleted.
+/// Removes the selected traces. Everything goes into a backup folder first:
+/// files are moved there, registry keys and tasks are exported.
 pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
-    let backup = backup_root().join(format!("{}-{}", stamp(), safe_name(app_name)));
-    let _ = std::fs::create_dir_all(&backup);
+    let backup = backup::create(app_name);
     let mut report = Report { removed: 0, failed: Vec::new(), backup: backup.clone() };
 
     let mut paths: Vec<&Leftover> = Vec::new();
@@ -214,15 +199,15 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
     }
 
     let mut gone: Vec<&Path> = Vec::new();
-    for l in &paths {
+    for (i, l) in paths.iter().enumerate() {
         let Kind::Path { path: p, .. } = &l.kind else { continue };
         if !p.exists() {
             report.removed += 1;
             continue;
         }
-        let res = match recycle(p) {
-            Ok(()) if !p.exists() => Ok(()),
-            Ok(()) => Err("Some files are in use".to_string()),
+        let res = match backup::store(&backup, i, p) {
+            Ok(_) if p.exists() => Err("Some files are in use".to_string()),
+            Ok(_) => Ok(()),
             Err(e) => Err(e),
         };
         match res {
@@ -244,8 +229,8 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
     }
     remove_empty_parents(&gone);
 
-    if std::fs::read_dir(&backup).map(|mut d| d.next().is_none()).unwrap_or(false) {
-        let _ = std::fs::remove_dir(&backup);
+    if !backup.join("manifest.txt").exists() {
+        let _ = std::fs::remove_dir_all(&backup);
     }
     report
 }
@@ -275,14 +260,15 @@ fn hidden(cmd: &str) -> Command {
 }
 
 fn export_key(full: &str, switch: &str, dir: &Path, i: usize) -> Result<(), String> {
-    let file = dir.join(format!("{i:03}.reg"));
+    let name = format!("{i:03}.reg");
     let out = hidden("reg.exe")
         .args(["export", full])
-        .arg(&file)
+        .arg(dir.join(&name))
         .args(["/y", switch])
         .output()
         .map_err(|e| e.to_string())?;
     if out.status.success() {
+        backup::note(dir, &["reg", &name]);
         Ok(())
     } else {
         Err("Backup failed, nothing was deleted".into())
@@ -295,7 +281,10 @@ fn backup_value(hive: Hive, view: View, path: &str, name: &str, dir: &Path, i: u
     let Some(text) = reg::value_to_reg(hive, view, path, name) else {
         return Err("Backup failed, nothing was deleted".into());
     };
-    reg::write_reg_file(&dir.join(format!("{i:03}.reg")), &text).map_err(|e| e.to_string())
+    let file = format!("{i:03}.reg");
+    reg::write_reg_file(&dir.join(&file), &text).map_err(|e| e.to_string())?;
+    backup::note(dir, &["reg", &file]);
+    Ok(())
 }
 
 fn delete_service(name: &str, dir: &Path, i: usize) -> Result<(), String> {
@@ -346,16 +335,18 @@ fn delete_task(name: &str, dir: &Path, i: usize) -> Result<(), String> {
     if !q.status.success() {
         return Err("Could not read the task, run as administrator".into());
     }
-    std::fs::write(dir.join(format!("{i:03}-task.xml")), &q.stdout).map_err(|e| e.to_string())?;
+    let file = format!("{i:03}-task.xml");
+    std::fs::write(dir.join(&file), &q.stdout).map_err(|e| e.to_string())?;
     let d = hidden("schtasks.exe").args(["/Delete", "/TN", name, "/F"]).output().map_err(|e| e.to_string())?;
     if d.status.success() {
+        backup::note(dir, &["task", &file, name]);
         Ok(())
     } else {
         Err(String::from_utf8_lossy(&d.stderr).trim().to_string())
     }
 }
 
-fn recycle(p: &Path) -> Result<(), String> {
+pub fn recycle(p: &Path) -> Result<(), String> {
     let mut from = wide(&p.to_string_lossy());
     from.push(0);
     let mut op: SHFILEOPSTRUCTW = unsafe { std::mem::zeroed() };

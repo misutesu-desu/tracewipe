@@ -1,5 +1,6 @@
 use crate::apps::{self, App};
 use crate::leftovers::{self, Confidence, Kind, Leftover};
+use crate::backup;
 use crate::procs;
 use crate::reg;
 use crate::remove::{self, Report};
@@ -33,6 +34,8 @@ enum Msg {
     Uninstalled(Result<(), String>),
     Scanned(Vec<Leftover>),
     Cleaned(Report),
+    Backups(Vec<backup::Backup>),
+    Restored(Vec<String>),
 }
 
 enum Stage {
@@ -42,6 +45,7 @@ enum Stage {
     Review { items: Vec<Leftover>, still_installed: bool },
     Cleaning,
     Done(Report),
+    Backups { list: Option<Vec<backup::Backup>>, message: Option<String> },
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -113,6 +117,7 @@ impl UiApp {
             theme,
         };
         s.reload(&cc.egui_ctx);
+        std::thread::spawn(backup::purge_old);
         s
     }
 
@@ -187,6 +192,15 @@ impl UiApp {
                     self.stage = Stage::Review { items, still_installed: still };
                 }
                 Msg::Cleaned(r) => self.stage = Stage::Done(r),
+                Msg::Backups(l) => {
+                    if let Stage::Backups { list, .. } = &mut self.stage {
+                        *list = Some(l);
+                    }
+                }
+                Msg::Restored(failed) => {
+                    let message = if failed.is_empty() { "Restored.".to_string() } else { failed.join("\n") };
+                    self.open_backups(ctx, Some(message));
+                }
             }
         }
     }
@@ -331,8 +345,9 @@ impl eframe::App for UiApp {
             Stage::Uninstalling => self.waiting(ui, p),
             Stage::Scanning => busy(ui, p, "Scanning for traces", "Searching files, the registry, shortcuts and scheduled tasks."),
             Stage::Review { .. } => self.review(ui, p),
-            Stage::Cleaning => busy(ui, p, "Cleaning", "Moving files to the Recycle Bin and backing up registry entries."),
+            Stage::Cleaning => busy(ui, p, "Cleaning", "Moving files into the backup folder and exporting registry entries."),
             Stage::Done(_) => self.done(ui, p),
+            Stage::Backups { .. } => self.backups(ui, p),
         });
     }
 }
@@ -359,6 +374,11 @@ impl UiApp {
             });
 
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                ui.add_enabled_ui(enabled, |ui| {
+                    if ui.add(egui::Button::new("Backups").min_size(Vec2::new(0.0, 28.0))).on_hover_text("Restore what earlier cleanups removed").clicked() {
+                        self.open_backups(ui.ctx(), None);
+                    }
+                });
                 ui.add_enabled_ui(enabled && !self.loading, |ui| {
                     if ui.add(egui::Button::new(icon(IC_REFRESH, 14.0)).min_size(Vec2::splat(28.0))).on_hover_text("Refresh (F5)").clicked()
                         || ui.input(|i| i.key_pressed(Key::F5))
@@ -610,6 +630,96 @@ impl UiApp {
     }
 }
 
+// ---------------------------------------------------------------- backups
+
+impl UiApp {
+    fn open_backups(&mut self, ctx: &egui::Context, message: Option<String>) {
+        self.stage = Stage::Backups { list: None, message };
+        let (tx, ctx) = (self.tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::Backups(backup::list()));
+            ctx.request_repaint();
+        });
+    }
+
+    fn backups(&mut self, ui: &mut Ui, p: &Pal) {
+        let ctx = ui.ctx().clone();
+        let Stage::Backups { list, message } = &mut self.stage else { return };
+        let mut back = false;
+        let mut restore = None;
+        let mut discard = None;
+        Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
+            ui.label(RichText::new("Backups").size(20.0).color(p.text));
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(format!("Each cleanup is kept for {} days, then deleted. Restoring puts files, registry entries and tasks back where they were.", backup::KEEP_DAYS))
+                    .color(p.weak),
+            );
+            if let Some(m) = message {
+                ui.add_space(6.0);
+                ui.label(RichText::new(m.as_str()).color(p.label));
+            }
+            ui.add_space(8.0);
+            if ui.add(egui::Button::new("Back to list").min_size(Vec2::new(0.0, 28.0))).clicked() {
+                back = true;
+            }
+        });
+        ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, p.divider));
+        match list {
+            None => busy(ui, p, "Reading backups", ""),
+            Some(l) if l.is_empty() => {
+                ui.add_space(24.0);
+                ui.vertical_centered(|ui| ui.label(RichText::new("No backups yet.").color(p.weak)));
+            }
+            Some(l) => {
+                egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let width = ui.available_width();
+                    for (i, b) in l.iter().enumerate() {
+                        let (r, resp) = ui.allocate_exact_size(Vec2::new(width, ROW + 16.0), Sense::hover());
+                        paint_row(ui, p, r, false, resp.hovered());
+                        let age = b.when.elapsed().map(|d| d.as_secs()).unwrap_or(0);
+                        let when = if age < 3600 { format!("{} min ago", age / 60) } else if age < 86400 { format!("{} h ago", age / 3600) } else { format!("{} days ago", age / 86400) };
+                        ui.painter().text(egui::pos2(r.left() + 16.0, r.top() + 12.0), Align2::LEFT_CENTER, &b.name, FontId::proportional(14.0), p.text);
+                        ui.painter().text(
+                            egui::pos2(r.left() + 16.0, r.top() + 31.0),
+                            Align2::LEFT_CENTER,
+                            format!("{when}, {} items, {}", b.items, human(b.size)),
+                            FontId::proportional(12.0),
+                            p.weak,
+                        );
+                        let rr = Rect::from_min_size(egui::pos2(r.right() - 230.0, r.center().y - 14.0), Vec2::new(90.0, 28.0));
+                        if ui.put(rr, egui::Button::new("Restore")).clicked() {
+                            restore = Some(i);
+                        }
+                        let dr = Rect::from_min_size(egui::pos2(r.right() - 132.0, r.center().y - 14.0), Vec2::new(116.0, 28.0));
+                        if ui.put(dr, egui::Button::new("Delete for good")).on_hover_text("Frees the space now. This cannot be undone.").clicked() {
+                            discard = Some(i);
+                        }
+                    }
+                });
+            }
+        }
+        let dir_of = |i: usize| match &self.stage {
+            Stage::Backups { list: Some(l), .. } => l.get(i).map(|b| b.dir.clone()),
+            _ => None,
+        };
+        if back {
+            self.back_to_list(&ctx);
+        } else if let Some(dir) = restore.and_then(dir_of) {
+            self.stage = Stage::Backups { list: None, message: Some("Restoring".into()) };
+            let (tx, ctx) = (self.tx.clone(), ctx.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(Msg::Restored(backup::restore(&dir)));
+                ctx.request_repaint();
+            });
+        } else if let Some(dir) = discard.and_then(dir_of) {
+            let message = backup::discard(&dir).err().map(|e| e.to_string());
+            self.open_backups(&ctx, message);
+        }
+    }
+}
+
 // ---------------------------------------------------------------- uninstall steps
 
 impl UiApp {
@@ -750,7 +860,7 @@ impl UiApp {
         Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
             ui.label(RichText::new("Cleanup finished").size(20.0).color(p.text));
             ui.add_space(6.0);
-            ui.label(RichText::new(format!("{} traces removed. Files are in the Recycle Bin.", r.removed)).color(p.weak));
+            ui.label(RichText::new(format!("{} traces removed. You can restore them from Backups for {} days.", r.removed, crate::backup::KEEP_DAYS)).color(p.weak));
             if backup.exists() {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Registry and task backup:").color(p.weak));
@@ -983,7 +1093,7 @@ pub fn human(bytes: u64) -> String {
 // ---------------------------------------------------------------- theme preference
 
 fn theme_file() -> PathBuf {
-    remove::backup_root().parent().map(|p| p.join("theme.txt")).unwrap_or_else(|| "theme.txt".into())
+    crate::backup::root().parent().map(|p| p.join("theme.txt")).unwrap_or_else(|| "theme.txt".into())
 }
 
 fn load_theme() -> ThemePreference {
