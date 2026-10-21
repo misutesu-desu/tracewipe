@@ -2,6 +2,8 @@
 name = "tracewipe"
 version = "0.1.0"
 edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Uninstaller for Windows that removes the traces programs leave behind"
 
 [dependencies]
 eframe = { version = "0.31.1", default-features = false, features = ["glow", "default_fonts", "accesskit"] }
