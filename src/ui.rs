@@ -1005,7 +1005,7 @@ impl UiApp {
         ui.add(
             egui::Label::new(
                 RichText::new(
-                    "The uninstallers run one after another. When the last one finishes, Tracewipe scans for what all of them left.",
+                    "The uninstallers run one after another. When the last one finishes, Nietono scans for what all of them left.",
                 )
                 .size(12.0)
                 .color(p.weak),
@@ -1085,7 +1085,7 @@ impl UiApp {
         ui.add(
             egui::Label::new(
                 RichText::new(
-                    "When the uninstaller finishes, Tracewipe scans for what is left. You review the list before anything is removed.",
+                    "When the uninstaller finishes, Nietono scans for what is left. You review the list before anything is removed.",
                 )
                 .size(12.0)
                 .color(p.weak),
@@ -1118,7 +1118,7 @@ impl UiApp {
             ui.set_width(520.0);
             ui.label(RichText::new("Pick a window").size(20.0).color(p.text));
             ui.add_space(4.0);
-            ui.label(RichText::new("Tracewipe selects the installed program it belongs to.").color(p.weak));
+            ui.label(RichText::new("Nietono selects the installed program it belongs to.").color(p.weak));
             ui.add_space(8.0);
             egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
                 for (title, exe) in list {

@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn finds_this_process_holding_a_file() {
-        let dir = std::env::temp_dir().join(format!("tracewipe-lock-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nietono-lock-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("held.txt");
         let handle = std::fs::File::create(&f).unwrap();

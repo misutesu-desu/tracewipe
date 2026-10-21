@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" width="112" alt="Tracewipe icon">
+  <img src="assets/icon.png" width="112" alt="Nietono icon">
 </p>
 
-<h1 align="center">Tracewipe</h1>
+<h1 align="center">Nietono</h1>
 
 <p align="center">
   An uninstaller for Windows 10 and 11 that also removes what programs leave behind.<br>
@@ -10,22 +10,25 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/misutesu-desu/tracewipe/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/misutesu-desu/tracewipe/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/github/license/misutesu-desu/tracewipe"></a>
+  <a href="https://github.com/misutesu-desu/nietono/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/misutesu-desu/nietono/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/github/license/misutesu-desu/nietono"></a>
 </p>
 
 <p align="center">
-  <a href="https://misutesu-desu.github.io/tracewipe/">Website</a>
+  <a href="https://misutesu-desu.github.io/nietono/">Website</a>
   · <a href="#how-a-removal-works">How it works</a>
   · <a href="#command-line">Command line</a>
   · <a href="#building">Building</a>
   · <a href="#türkçe">Türkçe</a>
 </p>
 
-Tracewipe is a single executable of about 5 MB, written in Rust. It lists installed
+Nietono is a single executable of about 5 MB, written in Rust. It lists installed
 programs, runs their own uninstaller, waits for it to really finish and then
 looks for the folders, registry keys, services, tasks and other entries the
 uninstaller did not remove. You see the list before anything is deleted.
+
+The name comes from Nietono no Shana, the sword in Shakugan no Shana that cuts
+through what is left behind.
 
 ## What it finds
 
@@ -33,7 +36,7 @@ Programs come from four places: the Uninstall registry keys, Microsoft Store
 packages, Scoop and Chocolatey. On a machine with 155 programs the list is ready
 in about 25 ms and Store packages join it a tenth of a second later.
 
-After an uninstall, Tracewipe looks for:
+After an uninstall, Nietono looks for:
 
 | Where | What counts as a trace |
 |---|---|
@@ -48,8 +51,8 @@ A scan takes about 0.3 seconds on the same machine.
 
 ## How a removal works
 
-1. If the program is running, Tracewipe offers to close it first.
-2. The program's uninstaller runs inside a job object. Tracewipe waits until the
+1. If the program is running, Nietono offers to close it first.
+2. The program's uninstaller runs inside a job object. Nietono waits until the
    uninstaller and every process it started have exited, so NSIS uninstallers
    that copy themselves to a temp folder are not mistaken for finished.
 3. The leftover scan runs. Items with strong evidence come checked. Weaker
@@ -71,7 +74,7 @@ them.
 - Windows, Program Files itself, the profile folders and the package managers'
   own folders are never offered.
 - Every removal can be undone from **More > Backups** for seven days.
-- Files that are in use show which program holds them. Tracewipe can close that
+- Files that are in use show which program holds them. Nietono can close that
   program and retry, or remove the files at the next restart.
 - An optional System Restore point can be created before uninstalling.
 
@@ -95,10 +98,10 @@ administrator rights.
 The same executable works from a terminal:
 
 ```text
-tracewipe --list
-tracewipe --scan <name> [--deep]
-tracewipe --orphans
-tracewipe --uninstall <name> [--quiet] [--force] [--yes]
+nietono --list
+nietono --scan <name> [--deep]
+nietono --orphans
+nietono --uninstall <name> [--quiet] [--force] [--yes]
 ```
 
 `--scan` and `--orphans` only list. `--uninstall` runs the uninstaller and scans,
@@ -114,7 +117,7 @@ Build Tools.
 cargo build --release
 ```
 
-The executable is `target\release\tracewipe.exe`. Run it as administrator to
+The executable is `target\release\nietono.exe`. Run it as administrator to
 remove traces under Program Files and HKLM.
 
 ## Testing
@@ -124,8 +127,8 @@ cargo test
 ```
 
 `tests/integration.ps1` installs an NSIS, an Inno Setup and an MSI program,
-removes them with Tracewipe and checks the result. CI runs it on a fresh GitHub
-runner. To run it locally, use `tests/sandbox/tracewipe.wsb`, which starts it
+removes them with Nietono and checks the result. CI runs it on a fresh GitHub
+runner. To run it locally, use `tests/sandbox/nietono.wsb`, which starts it
 inside Windows Sandbox.
 
 ## License
@@ -134,7 +137,7 @@ GPL-3.0-or-later. See [LICENSE](LICENSE).
 
 ## Türkçe
 
-Tracewipe, Windows için Rust ile yazılmış bir kaldırıcı. Programın kendi
+Nietono, Windows için Rust ile yazılmış bir kaldırıcı. Programın kendi
 kaldırıcısını çalıştırır, bitmesini bekler, sonra geride kalan klasör, kayıt
 defteri anahtarı, servis, zamanlanmış görev ve diğer izleri bulur. Silmeden önce
 listeyi görürsünüz. Silinen her şey yedek klasörüne gider ve yedi gün boyunca

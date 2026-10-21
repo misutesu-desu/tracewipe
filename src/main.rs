@@ -26,20 +26,20 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("Tracewipe")
+            .with_title("Nietono")
             .with_inner_size([1180.0, 720.0])
             .with_min_inner_size([960.0, 520.0])
             .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default()),
         ..Default::default()
     };
-    eframe::run_native("Tracewipe", options, Box::new(|cc| Ok(Box::new(ui::UiApp::new(cc)))))
+    eframe::run_native("Nietono", options, Box::new(|cc| Ok(Box::new(ui::UiApp::new(cc)))))
 }
 
 const USAGE: &str = "usage:
-  tracewipe --list
-  tracewipe --scan <name> [--deep]
-  tracewipe --orphans
-  tracewipe --uninstall <name> [--quiet] [--force] [--yes]
+  nietono --list
+  nietono --scan <name> [--deep]
+  nietono --orphans
+  nietono --uninstall <name> [--quiet] [--force] [--yes]
 
 --scan and --orphans only list. --uninstall runs the uninstaller, then
 scans. With --yes it also removes the checked traces into a backup.

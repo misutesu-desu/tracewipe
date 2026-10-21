@@ -25,7 +25,7 @@ pub const KEEP_DAYS: u64 = 7;
 
 pub fn root() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    base.join("Tracewipe").join("backups")
+    base.join("Nietono").join("backups")
 }
 
 fn safe_name(s: &str) -> String {
@@ -191,10 +191,10 @@ mod tests {
 
     #[test]
     fn clean_then_restore_round_trip() {
-        let tmp = std::env::temp_dir().join(format!("tracewipe-rt-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("nietono-rt-{}", std::process::id()));
         std::fs::create_dir_all(tmp.join("sub")).unwrap();
         std::fs::write(tmp.join("sub").join("a.txt"), "hello").unwrap();
-        let key = format!("SOFTWARE\\TracewipeTest{}", std::process::id());
+        let key = format!("SOFTWARE\\NietonoTest{}", std::process::id());
         std::process::Command::new("reg.exe").args(["add", &format!("HKCU\\{key}"), "/v", "x", "/d", "1", "/f"]).output().unwrap();
 
         let items = vec![
@@ -223,7 +223,7 @@ mod tests {
             return;
         }
         // App Paths is shared by the 32 and 64-bit views.
-        let key = format!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\tracewipe-test-{}.exe", std::process::id());
+        let key = format!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\nietono-test-{}.exe", std::process::id());
         std::process::Command::new("reg.exe").args(["add", &format!("HKLM\\{key}"), "/ve", "/d", "x", "/f", "/reg:64"]).output().unwrap();
         let items: Vec<Leftover> = [View::V64, View::V32]
             .into_iter()
@@ -242,7 +242,7 @@ mod tests {
         if !crate::remove::is_admin() {
             return;
         }
-        let key = format!("SOFTWARE\\TracewipeTest32-{}", std::process::id());
+        let key = format!("SOFTWARE\\NietonoTest32-{}", std::process::id());
         std::process::Command::new("reg.exe")
             .args(["add", &format!("HKLM\\{key}"), "/v", "x", "/d", "1", "/f", "/reg:32"])
             .output()

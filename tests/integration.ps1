@@ -1,7 +1,7 @@
-# Installs real programs, removes them with Tracewipe and checks that their
+# Installs real programs, removes them with Nietono and checks that their
 # folders are gone. Runs on GitHub's Windows runners and in Windows Sandbox.
 #
-#   pwsh tests/integration.ps1 -Exe target\release\tracewipe.exe
+#   pwsh tests/integration.ps1 -Exe target\release\nietono.exe
 #
 # Programs come from Chocolatey when it is installed, otherwise from their
 # publishers' download pages. Run it only on a machine you can throw away:
@@ -13,10 +13,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Exe = (Resolve-Path $Exe).Path
-$work = Join-Path $env:TEMP 'tracewipe-integration'
+$work = Join-Path $env:TEMP 'nietono-integration'
 New-Item -ItemType Directory -Force $work | Out-Null
 
-# One case per installer technology Tracewipe handles differently.
+# One case per installer technology Nietono handles differently.
 $cases = @(
     @{
         Name    = 'NSIS'
@@ -44,7 +44,7 @@ $cases = @(
     }
 )
 
-function Invoke-Tracewipe([string[]] $Arguments) {
+function Invoke-Nietono([string[]] $Arguments) {
     # The release build is a GUI program, so wait for it explicitly and read its output from files.
     $out = Join-Path $work 'out.txt'
     $err = Join-Path $work 'err.txt'
@@ -72,8 +72,8 @@ function Install-Case($c) {
 $failed = @()
 
 Write-Host '== smoke'
-if ((Invoke-Tracewipe @('--list')) -ne 0) { $failed += 'list' }
-if ((Invoke-Tracewipe @('--orphans')) -ne 0) { $failed += 'orphans' }
+if ((Invoke-Nietono @('--list')) -ne 0) { $failed += 'list' }
+if ((Invoke-Nietono @('--orphans')) -ne 0) { $failed += 'orphans' }
 
 foreach ($c in $cases) {
     Write-Host "== $($c.Name)"
@@ -82,9 +82,9 @@ foreach ($c in $cases) {
         $failed += "$($c.Name): install did not create $($c.Folder)"
         continue
     }
-    $code = Invoke-Tracewipe (@('--uninstall') + ($c.Query -split ' ') + @('--quiet', '--yes'))
+    $code = Invoke-Nietono (@('--uninstall') + ($c.Query -split ' ') + @('--quiet', '--yes'))
     if ($code -ne 0) {
-        $failed += "$($c.Name): tracewipe exited with $code"
+        $failed += "$($c.Name): nietono exited with $code"
     } elseif (Test-Path $c.Folder) {
         $failed += "$($c.Name): $($c.Folder) is still there"
     } else {

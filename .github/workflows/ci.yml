@@ -23,8 +23,8 @@ jobs:
         run: cargo build --release
       - uses: actions/upload-artifact@v4
         with:
-          name: tracewipe
-          path: target/release/tracewipe.exe
+          name: nietono
+          path: target/release/nietono.exe
 
   integration:
     needs: build
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: tracewipe
+          name: nietono
       - name: Install, uninstall and check real programs
         shell: pwsh
-        run: tests/integration.ps1 -Exe tracewipe.exe
+        run: tests/integration.ps1 -Exe nietono.exe

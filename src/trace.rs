@@ -233,7 +233,7 @@ fn is_noise(p: &Path) -> bool {
     if let Some(l) = env_lower("LOCALAPPDATA") {
         prefixes.push(format!("{l}\\microsoft\\windows"));
         prefixes.push(format!("{l}\\packages"));
-        prefixes.push(format!("{l}\\tracewipe"));
+        prefixes.push(format!("{l}\\nietono"));
         prefixes.push(format!("{l}\\temp"));
     }
     if let Some(r) = env_lower("APPDATA") {
@@ -454,10 +454,10 @@ mod tests {
         }
         let snap = begin().expect("journal");
         let home = PathBuf::from(std::env::var("USERPROFILE").unwrap());
-        let dir = home.join(format!("tracewipe-trace-test-{}", std::process::id()));
+        let dir = home.join(format!("nietono-trace-test-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("sub").join("a.txt"), "x").unwrap();
-        let key = format!("SOFTWARE\\TracewipeTraceTest{}", std::process::id());
+        let key = format!("SOFTWARE\\NietonoTraceTest{}", std::process::id());
         std::process::Command::new("reg.exe").args(["add", &format!("HKCU\\{key}\\Inner"), "/f"]).output().unwrap();
 
         let t = finish(snap);

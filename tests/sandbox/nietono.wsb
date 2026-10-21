@@ -6,12 +6,12 @@
 <Configuration>
   <MappedFolders>
     <MappedFolder>
-      <HostFolder>C:\src\tracewipe</HostFolder>
-      <SandboxFolder>C:\tracewipe</SandboxFolder>
+      <HostFolder>C:\src\nietono</HostFolder>
+      <SandboxFolder>C:\nietono</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>
   </MappedFolders>
   <LogonCommand>
-    <Command>powershell.exe -NoExit -ExecutionPolicy Bypass -File C:\tracewipe\tests\integration.ps1 -Exe C:\tracewipe\target\release\tracewipe.exe</Command>
+    <Command>powershell.exe -NoExit -ExecutionPolicy Bypass -File C:\nietono\tests\integration.ps1 -Exe C:\nietono\target\release\nietono.exe</Command>
   </LogonCommand>
 </Configuration>

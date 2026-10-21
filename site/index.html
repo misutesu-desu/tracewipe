@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tracewipe</title>
+<title>Nietono</title>
 <meta name="description" content="An uninstaller for Windows that also removes what programs leave behind, with a backup of everything it deletes.">
 <link rel="icon" href="icon.png">
 <script>
@@ -119,7 +119,7 @@ footer div { max-width: 960px; margin: 0 auto; padding: 16px; }
 <header class="bar">
   <div class="bar-inner">
     <img src="icon.png" alt="">
-    <span class="name">Tracewipe</span>
+    <span class="name">Nietono</span>
     <nav>
       <a href="#how">How it works</a>
       <a href="#finds">What it finds</a>
@@ -134,20 +134,20 @@ footer div { max-width: 960px; margin: 0 auto; padding: 16px; }
   <div class="hero">
     <div>
       <h1>Uninstall programs, and what they leave behind.</h1>
-      <p>Tracewipe runs a program's own uninstaller, waits for it to really finish, then finds the folders, registry keys, services and tasks it left. You review the list. Everything removed goes into a backup you can restore for seven days.</p>
+      <p>Nietono runs a program's own uninstaller, waits for it to really finish, then finds the folders, registry keys, services and tasks it left. You review the list. Everything removed goes into a backup you can restore for seven days.</p>
       <div class="actions">
-        <a class="button primary" href="https://github.com/misutesu-desu/tracewipe/releases/latest">Download for Windows</a>
-        <a class="button" href="https://github.com/misutesu-desu/tracewipe">Source code</a>
+        <a class="button primary" href="https://github.com/misutesu-desu/nietono/releases/latest">Download for Windows</a>
+        <a class="button" href="https://github.com/misutesu-desu/nietono">Source code</a>
       </div>
     </div>
-    <img src="icon.png" alt="Tracewipe icon">
+    <img src="icon.png" alt="Nietono icon">
   </div>
 
   <section id="how">
     <h2>How a removal works</h2>
     <ol class="steps">
-      <li><b>Close</b>If the program is running, Tracewipe offers to close it first.</li>
-      <li><b>Uninstall</b>The uninstaller runs in a job object. Tracewipe waits for it and every process it started.</li>
+      <li><b>Close</b>If the program is running, Nietono offers to close it first.</li>
+      <li><b>Uninstall</b>The uninstaller runs in a job object. Nietono waits for it and every process it started.</li>
       <li><b>Scan</b>Traces with strong evidence come checked. Weaker matches come unchecked, with the reason shown.</li>
       <li><b>Remove</b>Files move into the backup folder. Registry keys and tasks are exported before they go.</li>
     </ol>
@@ -186,23 +186,23 @@ footer div { max-width: 960px; margin: 0 auto; padding: 16px; }
 
   <section id="cli">
     <h2>Command line</h2>
-    <pre><code>tracewipe --list
-tracewipe --scan &lt;name&gt; [--deep]
-tracewipe --orphans
-tracewipe --uninstall &lt;name&gt; [--quiet] [--force] [--yes]</code></pre>
+    <pre><code>nietono --list
+nietono --scan &lt;name&gt; [--deep]
+nietono --orphans
+nietono --uninstall &lt;name&gt; [--quiet] [--force] [--yes]</code></pre>
     <p class="weak"><code>--scan</code> and <code>--orphans</code> only list. <code>--uninstall</code> runs the uninstaller and scans, and with <code>--yes</code> removes the checked traces into a backup.</p>
   </section>
 
   <section id="build">
     <h2>Build it yourself</h2>
-    <pre><code>git clone https://github.com/misutesu-desu/tracewipe
-cd tracewipe
+    <pre><code>git clone https://github.com/misutesu-desu/nietono
+cd nietono
 cargo build --release</code></pre>
     <p class="weak">Needs stable Rust and the Windows SDK. Run the program as administrator to remove traces under Program Files and HKLM.</p>
   </section>
 </main>
 
-<footer><div>Tracewipe is free software under GPL-3.0-or-later. <a href="https://github.com/misutesu-desu/tracewipe">GitHub</a></div></footer>
+<footer><div>Named after Nietono no Shana, the sword in Shakugan no Shana. Free software under GPL-3.0-or-later. <a href="https://github.com/misutesu-desu/nietono">GitHub</a></div></footer>
 
 <script>
   var order = ["system", "dark", "light"];
