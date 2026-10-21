@@ -206,7 +206,8 @@ pub fn name_variants(app: &App) -> Vec<String> {
         }
     }
     if let Some(loc) = &app.location {
-        if !app.location_guessed {
+        // Package folders are named after the package id and version, not the program.
+        if !app.location_guessed && !matches!(app.source, crate::apps::Source::Store { .. }) {
             if let Some(n) = loc.file_name() {
                 v.push(compact(&n.to_string_lossy()));
             }
