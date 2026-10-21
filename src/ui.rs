@@ -71,6 +71,8 @@ pub struct UiApp {
     error: Option<String>,
     /// Result of an action on the finish screen.
     notice: Option<String>,
+    /// Processes from the install folder that are running, waiting for a decision.
+    confirm_close: Option<(bool, Vec<procs::Proc>)>,
     stage: Stage,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -102,6 +104,7 @@ impl UiApp {
             forced: false,
             error: None,
             notice: None,
+            confirm_close: None,
             stage: Stage::List,
             tx,
             rx,
@@ -188,7 +191,18 @@ impl UiApp {
         }
     }
 
+    /// Starts an uninstall, first asking to close the program's running processes.
     fn start(&mut self, ctx: &egui::Context, forced: bool) {
+        let Some(app) = self.selected.and_then(|i| self.apps.get(i)) else { return };
+        let running = app.location.as_deref().filter(|_| !app.location_guessed).map(procs::running_in).unwrap_or_default();
+        if running.is_empty() {
+            self.start_with(ctx, forced, Vec::new());
+        } else {
+            self.confirm_close = Some((forced, running));
+        }
+    }
+
+    fn start_with(&mut self, ctx: &egui::Context, forced: bool, close: Vec<procs::Proc>) {
         let Some(app) = self.selected.and_then(|i| self.apps.get(i)).cloned() else { return };
         self.others = self
             .apps
@@ -201,6 +215,9 @@ impl UiApp {
         let cmd = app.command(self.quiet);
         self.target = Some(app);
         if forced {
+            if !close.is_empty() {
+                procs::close(&close, std::time::Duration::from_secs(3));
+            }
             self.start_scan(ctx);
             return;
         }
@@ -213,6 +230,9 @@ impl UiApp {
         self.stop.store(false, Ordering::Relaxed);
         let (tx, stop, ctx) = (self.tx.clone(), self.stop.clone(), ctx.clone());
         std::thread::spawn(move || {
+            if !close.is_empty() {
+                procs::close(&close, std::time::Duration::from_secs(3));
+            }
             let r = remove::run_uninstaller(&cmd, &stop);
             let _ = tx.send(Msg::Uninstalled(r));
             ctx.request_repaint();
@@ -303,6 +323,8 @@ impl eframe::App for UiApp {
                 .frame(Frame::new().fill(p.panel).inner_margin(Margin::same(16)))
                 .show(ctx, |ui| self.details(ui, p));
         }
+
+        self.close_dialog(ctx, p);
 
         egui::CentralPanel::default().frame(Frame::new().fill(p.content)).show(ctx, |ui| match self.stage {
             Stage::List => self.app_list(ui, p),
@@ -591,6 +613,42 @@ impl UiApp {
 // ---------------------------------------------------------------- uninstall steps
 
 impl UiApp {
+    fn close_dialog(&mut self, ctx: &egui::Context, p: &Pal) {
+        let Some((forced, running)) = self.confirm_close.clone() else { return };
+        let mut choice = None;
+        let modal = egui::Modal::new(egui::Id::new("close-running")).show(ctx, |ui| {
+            ui.set_width(420.0);
+            ui.label(RichText::new("The program is running").size(20.0).color(p.text));
+            ui.add_space(6.0);
+            ui.label(RichText::new("These processes run from its folder. Uninstalling while they run can leave files behind.").color(p.weak));
+            ui.add_space(6.0);
+            for r in &running {
+                ui.label(RichText::new(format!("{}  {}", r.name, r.pid)).color(p.label));
+            }
+            ui.add_space(12.0);
+            ui.horizontal(|ui| {
+                if accent_button(ui, p, "Close them and continue").clicked() {
+                    choice = Some(Some(running.clone()));
+                }
+                if ui.add(egui::Button::new("Continue anyway").min_size(Vec2::new(0.0, 28.0))).clicked() {
+                    choice = Some(Some(Vec::new()));
+                }
+                if ui.add(egui::Button::new("Cancel").min_size(Vec2::new(0.0, 28.0))).clicked() {
+                    choice = Some(None);
+                }
+            });
+        });
+        if modal.should_close() && choice.is_none() {
+            choice = Some(None);
+        }
+        if let Some(c) = choice {
+            self.confirm_close = None;
+            if let Some(close) = c {
+                self.start_with(ctx, forced, close);
+            }
+        }
+    }
+
     fn waiting(&mut self, ui: &mut Ui, p: &Pal) {
         let name = self.target.as_ref().map(|a| a.name.as_str()).unwrap_or("");
         centered(ui, |ui| {

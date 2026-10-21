@@ -98,6 +98,95 @@ pub fn terminate(procs: &[Proc]) -> Vec<Proc> {
         .collect()
 }
 
+/// Full path of a process's executable.
+pub fn exe_path(pid: u32) -> Option<PathBuf> {
+    use windows_sys::Win32::System::Threading::{QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len) != 0;
+        CloseHandle(h);
+        ok.then(|| PathBuf::from(String::from_utf16_lossy(&buf[..len as usize])))
+    }
+}
+
+/// Processes whose executable lives under `dir`.
+pub fn running_in(dir: &Path) -> Vec<Proc> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
+    let prefix = format!("{}\\", dir.to_string_lossy().trim_end_matches('\\').to_lowercase());
+    let me = std::process::id();
+    let mut out = Vec::new();
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap.is_null() || snap == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+            return out;
+        }
+        let mut e: PROCESSENTRY32W = std::mem::zeroed();
+        e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut more = Process32FirstW(snap, &mut e) != 0;
+        while more {
+            if e.th32ProcessID != me {
+                if let Some(path) = exe_path(e.th32ProcessID) {
+                    if path.to_string_lossy().to_lowercase().starts_with(&prefix) {
+                        let end = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+                        out.push(Proc { pid: e.th32ProcessID, name: String::from_utf16_lossy(&e.szExeFile[..end]) });
+                    }
+                }
+            }
+            more = Process32NextW(snap, &mut e) != 0;
+        }
+        CloseHandle(snap);
+    }
+    out
+}
+
+/// Visible top-level windows with a title, and the process that owns each.
+pub fn top_windows() -> Vec<(windows_sys::Win32::Foundation::HWND, u32, String)> {
+    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    unsafe extern "system" fn each(hwnd: HWND, lp: LPARAM) -> BOOL {
+        let out = &mut *(lp as *mut Vec<(HWND, u32, String)>);
+        if IsWindowVisible(hwnd) == 0 || !GetWindow(hwnd, GW_OWNER).is_null() {
+            return 1;
+        }
+        let mut buf = [0u16; 512];
+        let n = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
+        if n <= 0 {
+            return 1;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        out.push((hwnd, pid, String::from_utf16_lossy(&buf[..n as usize])));
+        1
+    }
+    let mut out: Vec<(HWND, u32, String)> = Vec::new();
+    unsafe { EnumWindows(Some(each), &mut out as *mut _ as LPARAM) };
+    out
+}
+
+/// Asks the processes to close through their windows, waits up to `wait`,
+/// then ends the ones still running. Returns those that survived both.
+pub fn close(procs: &[Proc], wait: std::time::Duration) -> Vec<Proc> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+    let pids: Vec<u32> = procs.iter().map(|p| p.pid).collect();
+    for (hwnd, pid, _) in top_windows() {
+        if pids.contains(&pid) {
+            unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
+        }
+    }
+    let deadline = std::time::Instant::now() + wait;
+    let alive = |p: &Proc| exe_path(p.pid).is_some();
+    while std::time::Instant::now() < deadline && procs.iter().any(alive) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let left: Vec<Proc> = procs.iter().filter(|p| alive(p)).cloned().collect();
+    terminate(&left)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +201,14 @@ mod tests {
         assert!(found.iter().any(|p| p.pid == std::process::id()), "{found:?}");
         drop(handle);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reads_own_exe_path() {
+        let me = std::env::current_exe().unwrap();
+        assert_eq!(exe_path(std::process::id()).map(|p| p.to_string_lossy().to_lowercase()), Some(me.to_string_lossy().to_lowercase()));
+        let windir = PathBuf::from(std::env::var("SystemRoot").unwrap());
+        assert!(running_in(&windir).iter().any(|p| p.name.eq_ignore_ascii_case("explorer.exe") || p.name.eq_ignore_ascii_case("svchost.exe")));
     }
 }
 
