@@ -113,6 +113,20 @@ impl App {
         }
     }
 
+    /// The entry names an uninstaller that is no longer on disk.
+    pub fn broken(&self) -> bool {
+        if self.source != Source::Registry || self.msi {
+            return false;
+        }
+        match self.uninstall.as_deref().and_then(split_command) {
+            Some((exe, _)) => {
+                let p = Path::new(&exe);
+                p.is_absolute() && !p.exists()
+            }
+            None => false,
+        }
+    }
+
     pub fn can_be_quiet(&self) -> bool {
         self.command(true) != self.command(false)
     }
@@ -349,6 +363,9 @@ mod tests {
         a.quiet_uninstall = Some("x /quiet".into());
         assert_eq!(a.command(true).as_deref(), Some("x /quiet"));
         assert!(!a.command(false).unwrap().contains("/S"));
+        assert!(a.broken(), "the uninstaller path does not exist");
+        a.uninstall = Some(format!("\"{}\" /x", std::env::current_exe().unwrap().display()));
+        assert!(!a.broken());
     }
 
     #[test]

@@ -378,6 +378,15 @@ fn remove_empty_parents(paths: &[&Path]) {
     }
 }
 
+/// Opens Registry Editor at a key. Registry Editor reopens the key it last
+/// showed, so the key is written there first.
+pub fn open_regedit(display_path: &str) {
+    let full = display_path.replacen("HKLM", "HKEY_LOCAL_MACHINE", 1).replacen("HKCU", "HKEY_CURRENT_USER", 1);
+    let key = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Applets\\Regedit";
+    let _ = hidden("reg.exe").args(["add", &format!("HKCU\\{key}"), "/v", "LastKey", "/d", &format!("Computer\\{full}"), "/f"]).output();
+    let _ = Command::new("regedit.exe").arg("/m").spawn();
+}
+
 /// Opens the folder in Explorer.
 pub fn reveal(p: &Path) {
     let _ = Command::new("explorer.exe").arg(p).spawn();

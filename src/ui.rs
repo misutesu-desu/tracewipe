@@ -57,6 +57,25 @@ enum Stage {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+enum Filter {
+    All,
+    Recent,
+    Large,
+    Broken,
+    Store,
+}
+
+impl Filter {
+    const ALL: [(Filter, &'static str, &'static str); 5] = [
+        (Filter::All, "All", "Every program"),
+        (Filter::Recent, "Recent", "Installed in the last 30 days"),
+        (Filter::Large, "Large", "1 GB or more"),
+        (Filter::Broken, "Broken", "The uninstaller is missing. Use Force clean."),
+        (Filter::Store, "Store", "Microsoft Store apps"),
+    ];
+}
+
+#[derive(Clone, Copy, PartialEq)]
 enum Col {
     Name,
     Publisher,
@@ -98,6 +117,7 @@ pub struct UiApp {
     filtered: Vec<usize>,
     dirty: bool,
     search: String,
+    filter: Filter,
     sort: Col,
     asc: bool,
     selected: Option<usize>,
@@ -139,6 +159,7 @@ impl UiApp {
             filtered: Vec::new(),
             dirty: true,
             search: String::new(),
+            filter: Filter::All,
             sort: Col::Name,
             asc: true,
             selected: None,
@@ -480,7 +501,18 @@ impl UiApp {
         self.dirty = false;
         let q = self.search.trim().to_lowercase();
         let apps = &self.apps;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let month_ago = crate::store::civil_date(now - 30 * 86_400);
+        let filter = self.filter;
+        let keep = |a: &App| match filter {
+            Filter::All => true,
+            Filter::Recent => !a.install_date.is_empty() && a.install_date >= month_ago,
+            Filter::Large => a.size_kb >= 1024 * 1024,
+            Filter::Broken => a.broken(),
+            Filter::Store => matches!(a.source, apps::Source::Store { .. }),
+        };
         let mut v: Vec<usize> = (0..apps.len())
+            .filter(|&i| keep(&apps[i]))
             .filter(|&i| q.is_empty() || apps[i].name.to_lowercase().contains(&q) || apps[i].publisher.to_lowercase().contains(&q))
             .collect();
         let key = |a: &App| -> (String, u64) {
@@ -549,13 +581,20 @@ impl UiApp {
                 if ui.input(|i| i.modifiers.command && i.key_pressed(Key::F)) {
                     ui.memory_mut(|m| m.request_focus(id));
                 }
-                let r = search_box(ui, p, &mut self.search, id, 320.0);
+                let r = search_box(ui, p, &mut self.search, id, 260.0);
                 if r.changed() {
                     self.dirty = true;
                 }
                 if r.has_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
                     self.search.clear();
                     self.dirty = true;
+                }
+                ui.add_space(8.0);
+                for (f, label, tip) in Filter::ALL {
+                    if ui.selectable_label(self.filter == f, label).on_hover_text(tip).clicked() && self.filter != f {
+                        self.filter = f;
+                        self.dirty = true;
+                    }
                 }
             });
 
@@ -685,6 +724,7 @@ impl UiApp {
         self.keyboard_nav(ui);
         let sel_pos = self.selected.and_then(|s| self.filtered.iter().position(|&i| i == s));
         let mut clicked = None;
+        let mut action = None;
         ui.spacing_mut().item_spacing.y = 0.0;
         let mut scroll = egui::ScrollArea::vertical().auto_shrink(false);
         if self.reveal_selected {
@@ -737,12 +777,23 @@ impl UiApp {
                 if resp.clicked() {
                     clicked = Some(i);
                 }
+                if resp.secondary_clicked() && !self.multi.contains(&i) {
+                    self.multi = vec![i];
+                    self.selected = Some(i);
+                    self.anchor = Some(i);
+                }
+                resp.context_menu(|ui| row_menu(ui, a, &mut action));
             }
         });
         ui.data_mut(|d| d.insert_temp(ui.id().with("scroll_y"), out.state.offset.y));
         if let Some(i) = clicked {
             let m = ui.input(|i| i.modifiers);
             self.click_row(i, m.command, m.shift);
+        }
+        match action {
+            Some(RowAction::Uninstall) => self.start(ui.ctx(), false),
+            Some(RowAction::ForceClean) => self.start(ui.ctx(), true),
+            None => {}
         }
     }
 
@@ -1257,6 +1308,39 @@ fn leftover_row(ui: &mut Ui, p: &Pal, width: f32, l: &mut Leftover) {
     let g2 = elided(ui, &reason, FontId::proportional(12.0), reason_color, tw);
     ui.painter().galley(egui::pos2(text_x, r.top() + 21.0), g2, reason_color);
     ui.painter().text(egui::pos2(r.right() - 16.0, r.center().y), Align2::RIGHT_CENTER, size, FontId::proportional(12.0), p.weak);
+}
+
+// ---------------------------------------------------------------- row menu
+
+enum RowAction {
+    Uninstall,
+    ForceClean,
+}
+
+fn row_menu(ui: &mut Ui, a: &App, action: &mut Option<RowAction>) {
+    if ui.button("Uninstall").clicked() {
+        *action = Some(RowAction::Uninstall);
+        ui.close_menu();
+    }
+    if ui.button("Force clean").clicked() {
+        *action = Some(RowAction::ForceClean);
+        ui.close_menu();
+    }
+    ui.separator();
+    if let Some(loc) = a.location.as_ref().filter(|l| l.exists()) {
+        if ui.button("Open install folder").clicked() {
+            remove::reveal(loc);
+            ui.close_menu();
+        }
+    }
+    if a.source == apps::Source::Registry && ui.button("Show in Registry Editor").clicked() {
+        remove::open_regedit(&reg::display_path(a.hive, a.view, &a.key_path()));
+        ui.close_menu();
+    }
+    if ui.button("Copy name").clicked() {
+        ui.ctx().copy_text(a.name.clone());
+        ui.close_menu();
+    }
 }
 
 // ---------------------------------------------------------------- widgets

@@ -14,6 +14,11 @@ fn date(universal_time: i64) -> String {
     if secs <= 0 {
         return String::new();
     }
+    civil_date(secs)
+}
+
+/// yyyy-mm-dd for seconds since 1970.
+pub fn civil_date(secs: i64) -> String {
     // Civil date from days since 1970, after Howard Hinnant's algorithm.
     let z = secs / 86_400 + 719_468;
     let era = z.div_euclid(146_097);
