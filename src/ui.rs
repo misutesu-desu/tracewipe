@@ -31,6 +31,7 @@ const IC_SORT_DOWN: &str = "\u{E70D}";
 enum Msg {
     Apps(Vec<App>),
     Size { generation: u64, index: usize, kb: u64 },
+    Installer { generation: u64, index: usize, kind: apps::Installer },
     Uninstalled(Result<(), String>),
     Scanned(Vec<Leftover>),
     Cleaned(Report),
@@ -134,6 +135,23 @@ impl UiApp {
         });
     }
 
+    /// Looks inside uninstallers whose type the names did not reveal, in the background.
+    fn detect_installers(&self, ctx: &egui::Context) {
+        let jobs: Vec<(usize, App)> =
+            self.apps.iter().enumerate().filter(|(_, a)| a.installer == apps::Installer::Unknown).map(|(i, a)| (i, a.clone())).collect();
+        let (tx, ctx, generation) = (self.tx.clone(), ctx.clone(), self.generation);
+        std::thread::spawn(move || {
+            use rayon::prelude::*;
+            jobs.par_iter().for_each(|(index, a)| {
+                let kind = apps::detect_installer(a);
+                if kind != apps::Installer::Unknown {
+                    let _ = tx.send(Msg::Installer { generation, index: *index, kind });
+                    ctx.request_repaint();
+                }
+            });
+        });
+    }
+
     /// Measures the folder size of programs whose entry has no size, in the background.
     fn measure_sizes(&self, ctx: &egui::Context) {
         let jobs: Vec<(usize, PathBuf)> = self
@@ -169,6 +187,14 @@ impl UiApp {
                     self.dirty = true;
                     self.selected = keep.and_then(|k| self.apps.iter().position(|a| (a.key_name.clone(), a.hive, a.view) == k));
                     self.measure_sizes(ctx);
+                    self.detect_installers(ctx);
+                }
+                Msg::Installer { generation, index, kind } => {
+                    if generation == self.generation {
+                        if let Some(a) = self.apps.get_mut(index) {
+                            a.installer = kind;
+                        }
+                    }
                 }
                 Msg::Size { generation, index, kb } => {
                     if generation == self.generation {
@@ -611,10 +637,10 @@ impl UiApp {
         }
         field(ui, "Registry", &reg::display_path(a.hive, a.view, &a.key_path()));
         field(ui, "Scope", a.scope());
+        field(ui, "Uninstaller", a.installer.label());
 
         ui.add_space(10.0);
-        let has_quiet = a.quiet_uninstall.is_some() || (a.msi && apps::is_guid(&a.key_name));
-        if has_quiet {
+        if a.can_be_quiet() {
             checkbox(ui, p, &mut self.quiet, "Quiet uninstall");
         }
         ui.add_enabled_ui(self.admin, |ui| {

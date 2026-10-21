@@ -6,6 +6,28 @@ use std::path::{Path, PathBuf};
 
 const UNINSTALL: &str = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall";
 
+/// What built the uninstaller. Decides which switches make it quiet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Installer {
+    Msi,
+    Inno,
+    Nsis,
+    Squirrel,
+    Unknown,
+}
+
+impl Installer {
+    pub fn label(self) -> &'static str {
+        match self {
+            Installer::Msi => "Windows Installer",
+            Installer::Inno => "Inno Setup",
+            Installer::Nsis => "NSIS",
+            Installer::Squirrel => "Squirrel",
+            Installer::Unknown => "",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct App {
     pub name: String,
@@ -24,6 +46,7 @@ pub struct App {
     pub view: View,
     /// Name of the key under Uninstall.
     pub key_name: String,
+    pub installer: Installer,
 }
 
 impl App {
@@ -39,18 +62,32 @@ impl App {
         }
     }
 
-    /// Command to run. MSI entries use /X instead of /I.
+    /// Command to run. MSI entries use /X instead of /I. A quiet command comes
+    /// from the entry when it has one, otherwise from the installer type.
     pub fn command(&self, quiet: bool) -> Option<String> {
         if self.msi && is_guid(&self.key_name) {
-            let mode = if quiet { " /passive /norestart" } else { "" };
+            let mode = if quiet { " /qn /norestart" } else { "" };
             return Some(format!("MsiExec.exe /X{}{}", self.key_name, mode));
         }
-        if quiet {
-            if let Some(q) = &self.quiet_uninstall {
-                return Some(q.clone());
-            }
+        let cmd = self.uninstall.clone()?;
+        if !quiet {
+            return Some(cmd);
         }
-        self.uninstall.clone()
+        if let Some(q) = &self.quiet_uninstall {
+            return Some(q.clone());
+        }
+        let low = cmd.to_lowercase();
+        let extra = match self.installer {
+            Installer::Inno if !low.contains("/verysilent") => " /VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
+            Installer::Nsis if !low.split_whitespace().any(|a| a == "/s") => " /S",
+            Installer::Squirrel if low.contains("--uninstall") && !low.contains(" -s") => " -s",
+            _ => "",
+        };
+        Some(format!("{cmd}{extra}"))
+    }
+
+    pub fn can_be_quiet(&self) -> bool {
+        self.command(true) != self.command(false)
     }
 }
 
@@ -111,7 +148,9 @@ fn read(k: &Key, hive: Hive, view: View, key_name: String) -> Option<App> {
         location_guessed = location.is_some();
     }
 
+    let installer = guess_installer(msi, &key_name, uninstall.as_deref());
     Some(App {
+        installer,
         name,
         version: k.string("DisplayVersion").unwrap_or_default(),
         publisher: k.string("Publisher").unwrap_or_default(),
@@ -126,6 +165,39 @@ fn read(k: &Key, hive: Hive, view: View, key_name: String) -> Option<App> {
         view,
         key_name,
     })
+}
+
+/// Cheap guess from names alone. NSIS needs a look inside the file, see `detect_installer`.
+fn guess_installer(msi: bool, key_name: &str, cmd: Option<&str>) -> Installer {
+    if msi {
+        return Installer::Msi;
+    }
+    let Some((exe, args)) = cmd.and_then(split_command) else { return Installer::Unknown };
+    let file = Path::new(&exe).file_name().map(|f| f.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if key_name.ends_with("_is1") || (file.starts_with("unins") && file.ends_with(".exe") && file.len() <= 12) {
+        Installer::Inno
+    } else if file == "update.exe" && args.contains("--uninstall") {
+        Installer::Squirrel
+    } else {
+        Installer::Unknown
+    }
+}
+
+/// Reads the start of the uninstaller to find the NSIS stub's manifest name.
+pub fn detect_installer(app: &App) -> Installer {
+    if app.installer != Installer::Unknown {
+        return app.installer;
+    }
+    let Some((exe, _)) = app.uninstall.as_deref().and_then(split_command) else { return Installer::Unknown };
+    use std::io::Read;
+    let mut buf = vec![0u8; 512 * 1024];
+    let n = std::fs::File::open(&exe).and_then(|mut f| f.read(&mut buf)).unwrap_or(0);
+    let hay = &buf[..n];
+    if hay.windows(8).any(|w| w == b"Nullsoft") {
+        Installer::Nsis
+    } else {
+        Installer::Unknown
+    }
 }
 
 fn format_date(d: &str) -> String {
@@ -183,6 +255,34 @@ mod tests {
             split_command("MsiExec.exe /X{1234}"),
             Some(("MsiExec.exe".into(), "/X{1234}".into()))
         );
+    }
+
+    #[test]
+    fn quiet_switches() {
+        let mut a = App {
+            name: "Foo".into(),
+            version: String::new(),
+            publisher: String::new(),
+            install_date: String::new(),
+            size_kb: 0,
+            location: None,
+            location_guessed: false,
+            uninstall: Some(r#""C:\Program Files\Foo\unins000.exe""#.into()),
+            quiet_uninstall: None,
+            msi: false,
+            hive: Hive::Hklm,
+            view: View::V64,
+            key_name: "Foo_is1".into(),
+            installer: Installer::Unknown,
+        };
+        a.installer = guess_installer(a.msi, &a.key_name, a.uninstall.as_deref());
+        assert_eq!(a.installer, Installer::Inno);
+        assert!(a.command(true).unwrap().ends_with("/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"));
+        a.installer = Installer::Nsis;
+        assert!(a.command(true).unwrap().ends_with(" /S"));
+        a.quiet_uninstall = Some("x /quiet".into());
+        assert_eq!(a.command(true).as_deref(), Some("x /quiet"));
+        assert!(!a.command(false).unwrap().contains("/S"));
     }
 
     #[test]

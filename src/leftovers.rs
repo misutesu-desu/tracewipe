@@ -853,6 +853,7 @@ mod tests {
             hive: Hive::Hklm,
             view: View::V64,
             key_name: key.into(),
+            installer: crate::apps::Installer::Unknown,
         }
     }
 
