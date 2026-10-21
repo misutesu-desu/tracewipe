@@ -29,7 +29,8 @@ const IC_SORT_UP: &str = "\u{E70E}";
 const IC_SORT_DOWN: &str = "\u{E70D}";
 
 enum Msg {
-    Apps(Vec<App>),
+    /// The program list. `partial` is set while slower sources are still loading.
+    Apps { list: Vec<App>, partial: bool },
     Size { generation: u64, index: usize, kb: u64 },
     Installer { generation: u64, index: usize, kind: apps::Installer },
     /// The uninstaller of the job's program at this index has started.
@@ -60,6 +61,13 @@ enum Col {
     Version,
     Size,
     Date,
+}
+
+/// How one program of a job is removed.
+enum Removal {
+    Run(String),
+    Package(String),
+    Nothing,
 }
 
 /// Programs being removed together.
@@ -156,7 +164,17 @@ impl UiApp {
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(Msg::Apps(apps::load()));
+            // Registry entries take a few milliseconds, packaged apps far longer,
+            // so the list shows up first and the packages join it.
+            let (store_tx, store_rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = store_tx.send(crate::store::load());
+            });
+            let registry = apps::load_registry();
+            let _ = tx.send(Msg::Apps { list: apps::merge(registry.clone(), Vec::new()), partial: true });
+            ctx.request_repaint();
+            let store = store_rx.recv().unwrap_or_default();
+            let _ = tx.send(Msg::Apps { list: apps::merge(registry, store), partial: false });
             ctx.request_repaint();
         });
     }
@@ -205,18 +223,20 @@ impl UiApp {
     fn poll(&mut self, ctx: &egui::Context) {
         while let Ok(m) = self.rx.try_recv() {
             match m {
-                Msg::Apps(list) => {
+                Msg::Apps { list, partial } => {
                     let id = |a: &App| (a.key_name.clone(), a.hive, a.view);
                     let keep = self.selected.and_then(|i| self.apps.get(i)).map(id);
                     let keep_multi: Vec<_> = self.multi.iter().filter_map(|&i| self.apps.get(i)).map(id).collect();
                     self.apps = list;
                     self.multi = self.apps.iter().enumerate().filter(|(_, a)| keep_multi.contains(&id(a))).map(|(i, _)| i).collect();
                     self.generation += 1;
-                    self.loading = false;
+                    self.loading = partial;
                     self.dirty = true;
                     self.selected = keep.and_then(|k| self.apps.iter().position(|a| (a.key_name.clone(), a.hive, a.view) == k));
-                    self.measure_sizes(ctx);
-                    self.detect_installers(ctx);
+                    if !partial {
+                        self.measure_sizes(ctx);
+                        self.detect_installers(ctx);
+                    }
                 }
                 Msg::Installer { generation, index, kind } => {
                     if generation == self.generation {
@@ -253,7 +273,7 @@ impl UiApp {
                     let still: Vec<String> = if job.forced {
                         Vec::new()
                     } else {
-                        job.apps.iter().filter(|a| reg::key_exists(a.hive, a.view, &a.key_path())).map(|a| a.name.clone()).collect()
+                        job.apps.iter().filter(|a| a.still_installed()).map(|a| a.name.clone()).collect()
                     };
                     let single = job.apps.len() == 1;
                     for l in items.iter_mut() {
@@ -312,7 +332,16 @@ impl UiApp {
         let others = self.apps.iter().filter(|o| !apps.iter().any(|a| same(a, o))).cloned().collect();
         self.error = None;
         let quiet = self.quiet || apps.len() > 1 && self.batch_quiet;
-        let commands: Vec<(String, Option<String>)> = apps.iter().map(|a| (a.name.clone(), a.command(quiet && a.can_be_quiet()))).collect();
+        let commands: Vec<(String, Removal)> = apps
+            .iter()
+            .map(|a| {
+                let how = match &a.source {
+                    apps::Source::Store { full_name, .. } => Removal::Package(full_name.clone()),
+                    _ => a.command(quiet && a.can_be_quiet()).map(Removal::Run).unwrap_or(Removal::Nothing),
+                };
+                (a.name.clone(), how)
+            })
+            .collect();
         let job = Job { apps, others, forced, current: 0 };
         let restore_point = self.restore_point.then(|| format!("Before uninstalling {}", job.title()));
         self.job = Some(job);
@@ -340,13 +369,13 @@ impl UiApp {
                 stop.store(false, Ordering::Relaxed);
                 let _ = tx.send(Msg::Progress(i));
                 ctx.request_repaint();
-                match cmd {
-                    None => errors.push(format!("{name} has no uninstall command, scanned for traces only.")),
-                    Some(c) => {
-                        if let Err(e) = remove::run_uninstaller(c, &stop) {
-                            errors.push(format!("{name}: {e}"));
-                        }
-                    }
+                let res = match cmd {
+                    Removal::Nothing => Err("no uninstall command, scanned for traces only".to_string()),
+                    Removal::Run(c) => remove::run_uninstaller(c, &stop),
+                    Removal::Package(full) => crate::store::remove(full),
+                };
+                if let Err(e) = res {
+                    errors.push(format!("{name}: {e}"));
                 }
             }
             if let Some(s) = seq {
@@ -778,7 +807,10 @@ impl UiApp {
             }
             ui.add_space(6.0);
         }
-        field(ui, "Registry", &reg::display_path(a.hive, a.view, &a.key_path()));
+        match &a.source {
+            apps::Source::Registry => field(ui, "Registry", &reg::display_path(a.hive, a.view, &a.key_path())),
+            apps::Source::Store { full_name, .. } => field(ui, "Package", full_name),
+        }
         field(ui, "Scope", a.scope());
         field(ui, "Uninstaller", a.installer.label());
 

@@ -8,6 +8,7 @@ description = "Uninstaller for Windows that removes the traces programs leave be
 [dependencies]
 eframe = { version = "0.31.1", default-features = false, features = ["glow", "default_fonts", "accesskit"] }
 rayon = "1.10"
+windows = { version = "0.62", features = ["ApplicationModel", "Foundation", "Foundation_Collections", "Management_Deployment"] }
 
 [dependencies.windows-sys]
 version = "0.59"

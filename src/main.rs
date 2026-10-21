@@ -6,6 +6,7 @@ mod deep;
 mod leftovers;
 mod procs;
 mod reg;
+mod store;
 mod remove;
 mod theme;
 mod ui;

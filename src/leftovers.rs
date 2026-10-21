@@ -526,6 +526,11 @@ pub fn scan(app: &App, others: &[App]) -> Vec<Leftover> {
             let mut v: Vec<Leftover> = pl.file_roots.par_iter().flat_map_iter(|r| scan_file_root(r, &m)).collect();
             v.extend(pl.profile_roots.iter().flat_map(|r| scan_profile_root(r, &m)));
             v.extend(pl.shortcut_roots.par_iter().flat_map_iter(|(r, menu)| scan_shortcuts(r, &m, *menu, 0)).collect::<Vec<_>>());
+            if let crate::apps::Source::Store { family, .. } = &app.source {
+                if let Some(d) = crate::store::data_folder(family).filter(|d| d.is_dir()) {
+                    v.push(Leftover::new(Kind::Path { path: d, dir: true }, Confidence::High, "Package data folder"));
+                }
+            }
             if let Some(loc) = &app.location {
                 if m.location.is_some() && loc.exists() {
                     v.push(Leftover::new(Kind::Path { path: loc.clone(), dir: loc.is_dir() }, Confidence::High, "Install folder"));
@@ -749,7 +754,7 @@ const SKIP_KEYS: &[&str] = &["classes", "wow6432node", "policies", "registeredap
 fn scan_registry(app: &App, m: &Matcher) -> Vec<Leftover> {
     let mut out = Vec::new();
 
-    if reg::key_exists(app.hive, app.view, &app.key_path()) {
+    if app.source == crate::apps::Source::Registry && reg::key_exists(app.hive, app.view, &app.key_path()) {
         out.push(Leftover::new(
             Kind::Key { hive: app.hive, view: app.view, path: app.key_path() },
             Confidence::High,
@@ -856,6 +861,7 @@ mod tests {
             view: View::V64,
             key_name: key.into(),
             installer: crate::apps::Installer::Unknown,
+            source: crate::apps::Source::Registry,
         }
     }
 

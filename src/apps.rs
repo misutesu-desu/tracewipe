@@ -28,6 +28,13 @@ impl Installer {
     }
 }
 
+/// Where the program was found, which also decides how it is removed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Source {
+    Registry,
+    Store { full_name: String, family: String },
+}
+
 #[derive(Clone, Debug)]
 pub struct App {
     pub name: String,
@@ -47,6 +54,7 @@ pub struct App {
     /// Name of the key under Uninstall.
     pub key_name: String,
     pub installer: Installer,
+    pub source: Source,
 }
 
 impl App {
@@ -55,6 +63,9 @@ impl App {
     }
 
     pub fn scope(&self) -> &'static str {
+        if matches!(self.source, Source::Store { .. }) {
+            return "Store";
+        }
         match (self.hive, self.view) {
             (Hive::Hkcu, _) => "User",
             (Hive::Hklm, View::V64) => "64-bit",
@@ -86,6 +97,14 @@ impl App {
         Some(format!("{cmd}{extra}"))
     }
 
+    /// Whether the program is still there, checked after its uninstaller ran.
+    pub fn still_installed(&self) -> bool {
+        match &self.source {
+            Source::Registry => crate::reg::key_exists(self.hive, self.view, &self.key_path()),
+            Source::Store { family, .. } => crate::store::is_installed(family),
+        }
+    }
+
     pub fn can_be_quiet(&self) -> bool {
         self.command(true) != self.command(false)
     }
@@ -97,6 +116,17 @@ pub fn is_guid(s: &str) -> bool {
 }
 
 pub fn load() -> Vec<App> {
+    let (out, store) = rayon::join(load_registry, crate::store::load);
+    merge(out, store)
+}
+
+pub fn merge(mut a: Vec<App>, b: Vec<App>) -> Vec<App> {
+    a.extend(b);
+    a.sort_by_cached_key(|x| x.name.to_lowercase());
+    a
+}
+
+pub fn load_registry() -> Vec<App> {
     let sources = [
         (Hive::Hklm, View::V64),
         (Hive::Hklm, View::V32),
@@ -116,7 +146,6 @@ pub fn load() -> Vec<App> {
             }
         }
     }
-    out.sort_by_cached_key(|a| a.name.to_lowercase());
     out
 }
 
@@ -151,6 +180,7 @@ fn read(k: &Key, hive: Hive, view: View, key_name: String) -> Option<App> {
     let installer = guess_installer(msi, &key_name, uninstall.as_deref());
     Some(App {
         installer,
+        source: Source::Registry,
         name,
         version: k.string("DisplayVersion").unwrap_or_default(),
         publisher: k.string("Publisher").unwrap_or_default(),
@@ -274,6 +304,7 @@ mod tests {
             view: View::V64,
             key_name: "Foo_is1".into(),
             installer: Installer::Unknown,
+            source: Source::Registry,
         };
         a.installer = guess_installer(a.msi, &a.key_name, a.uninstall.as_deref());
         assert_eq!(a.installer, Installer::Inno);
