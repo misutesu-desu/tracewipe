@@ -38,12 +38,6 @@ impl View {
             View::V32 => KEY_WOW64_32KEY,
         }
     }
-    pub fn reg_switch(self) -> &'static str {
-        match self {
-            View::V64 => "/reg:64",
-            View::V32 => "/reg:32",
-        }
-    }
 }
 
 /// Full path as shown to the user. The 32-bit view is written as WOW6432Node.

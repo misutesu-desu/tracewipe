@@ -215,4 +215,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         reg::delete_tree(Hive::Hkcu, View::V64, &key).unwrap();
     }
+
+    /// 32-bit keys are written to backups through their WOW6432Node path.
+    #[test]
+    fn restores_a_32_bit_key() {
+        if !crate::remove::is_admin() {
+            return;
+        }
+        let key = format!("SOFTWARE\\TracewipeTest32-{}", std::process::id());
+        std::process::Command::new("reg.exe")
+            .args(["add", &format!("HKLM\\{key}"), "/v", "x", "/d", "1", "/f", "/reg:32"])
+            .output()
+            .unwrap();
+        assert!(reg::key_exists(Hive::Hklm, View::V32, &key));
+
+        let items = vec![Leftover::new(Kind::Key { hive: Hive::Hklm, view: View::V32, path: key.clone() }, Confidence::High, "")];
+        let report = crate::remove::clean("32-bit test", &items);
+        assert_eq!(report.removed, 1, "{:?}", report.failed.iter().map(|f| &f.reason).collect::<Vec<_>>());
+        assert!(!reg::key_exists(Hive::Hklm, View::V32, &key));
+
+        assert!(super::restore(&report.backup).is_empty());
+        assert!(reg::key_exists(Hive::Hklm, View::V32, &key));
+        assert!(!reg::key_exists(Hive::Hklm, View::V64, &key), "restored into the 32-bit view, not the 64-bit one");
+        reg::delete_tree(Hive::Hklm, View::V32, &key).unwrap();
+    }
 }

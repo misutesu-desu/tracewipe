@@ -158,7 +158,7 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
                 paths.push(l);
                 continue;
             }
-            Kind::Key { hive, view, path } => export_key(&reg::display_path(*hive, *view, path), view.reg_switch(), &backup, i)
+            Kind::Key { hive, view, path } => export_key(&reg::display_path(*hive, *view, path), &backup, i)
                 .and_then(|_| reg::delete_tree(*hive, *view, path).map_err(win_err)),
             Kind::Value { hive, view, path, name } => backup_value(*hive, *view, path, name, &backup, i)
                 .and_then(|_| reg::delete_value(*hive, *view, path, name).map_err(win_err)),
@@ -258,9 +258,12 @@ fn hidden(cmd: &str) -> Command {
     c
 }
 
-fn export_key(full: &str, switch: &str, dir: &Path, i: usize) -> Result<(), String> {
+/// Exports a key given by its display path. That path names WOW6432Node for
+/// the 32-bit view already, so reg.exe must look at the 64-bit view: with
+/// /reg:32 it would redirect a second time and find nothing.
+fn export_key(full: &str, dir: &Path, i: usize) -> Result<(), String> {
     let name = format!("{i:03}.reg");
-    let out = hidden("reg.exe").args(["export", full]).arg(dir.join(&name)).args(["/y", switch]).output().map_err(|e| e.to_string())?;
+    let out = hidden("reg.exe").args(["export", full]).arg(dir.join(&name)).args(["/y", "/reg:64"]).output().map_err(|e| e.to_string())?;
     if out.status.success() {
         backup::note(dir, &["reg", &name]);
         Ok(())
@@ -283,7 +286,7 @@ fn backup_value(hive: Hive, view: View, path: &str, name: &str, dir: &Path, i: u
 
 fn delete_service(name: &str, dir: &Path, i: usize) -> Result<(), String> {
     let key = format!("HKLM\\SYSTEM\\CurrentControlSet\\Services\\{name}");
-    export_key(&key, "/reg:64", dir, i)?;
+    export_key(&key, dir, i)?;
     let _ = hidden("sc.exe").args(["stop", name]).output();
     let d = hidden("sc.exe").args(["delete", name]).output().map_err(|e| e.to_string())?;
     if d.status.success() {
