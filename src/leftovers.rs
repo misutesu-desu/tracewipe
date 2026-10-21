@@ -527,7 +527,21 @@ impl Matcher {
 
 // ---------------------------------------------------------------- scan
 
-pub fn scan(app: &App, others: &[App]) -> Vec<Leftover> {
+/// How far the scan reaches. Deeper finds more and needs more care in review.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Depth {
+    /// Only traces with strong evidence.
+    Safe,
+    Normal,
+    /// Also folders and keys whose name starts with the program's name.
+    Deep,
+}
+
+impl Depth {
+    pub const ALL: [(Depth, &'static str); 3] = [(Depth::Safe, "Safe"), (Depth::Normal, "Normal"), (Depth::Deep, "Deep")];
+}
+
+pub fn scan(app: &App, others: &[App], depth: Depth) -> Vec<Leftover> {
     let m = Matcher::new(app, others);
     let pl = places();
 
@@ -577,6 +591,12 @@ pub fn scan(app: &App, others: &[App]) -> Vec<Leftover> {
     });
     files.append(&mut keys);
     files.extend(tasks);
+    if depth == Depth::Deep {
+        files.extend(scan_prefixes(&m));
+    }
+    if depth == Depth::Safe {
+        files.retain(|l| l.confidence == Confidence::High);
+    }
 
     let mut out = dedupe(files);
     out.par_iter_mut().for_each(|l| {
@@ -625,6 +645,35 @@ fn dedupe(mut v: Vec<Leftover>) -> Vec<Leftover> {
                 kept.push(k);
             }
             out.push(l);
+        }
+    }
+    out
+}
+
+/// Deep scan: top-level folders and keys whose name starts with one of the
+/// program's names, like "FooUpdater" or "Foo Helper" for "Foo".
+fn scan_prefixes(m: &Matcher) -> Vec<Leftover> {
+    let starts = |entry: &str| {
+        let c = compact(entry);
+        m.name_hit(entry).is_none() && m.names.iter().any(|n| n.chars().count() >= 4 && c.len() > n.len() && c.starts_with(n.as_str()))
+    };
+    let reason = "Name starts with the program's name";
+    let mut out: Vec<Leftover> = places()
+        .file_roots
+        .par_iter()
+        .flat_map_iter(|root| {
+            read_dir_names(root)
+                .into_iter()
+                .filter(|(n, _, d)| *d && starts(n))
+                .map(|(_, path, _)| Leftover::new(Kind::Path { path, dir: true }, Confidence::Medium, reason))
+                .collect::<Vec<_>>()
+        })
+        .filter(|l| matches!(&l.kind, Kind::Path { path, .. } if !is_protected(path) && !m.owned_by_other(path)))
+        .collect();
+    for (hive, view) in SOFTWARE_VIEWS {
+        let Some(sw) = Key::open(hive, view, "SOFTWARE") else { continue };
+        for name in sw.subkeys().into_iter().filter(|n| starts(n)) {
+            out.push(Leftover::new(Kind::Key { hive, view, path: format!("SOFTWARE\\{name}") }, Confidence::Medium, reason));
         }
     }
     out

@@ -130,6 +130,7 @@ pub struct UiApp {
     /// Quiet mode for batch removal, where answering many wizards is the point to avoid.
     batch_quiet: bool,
     restore_point: bool,
+    depth: leftovers::Depth,
     job: Option<Job>,
     error: Option<String>,
     /// Result of an action on the finish screen.
@@ -173,6 +174,7 @@ impl UiApp {
             quiet: false,
             batch_quiet: true,
             restore_point: false,
+            depth: leftovers::Depth::Normal,
             job: None,
             error: None,
             notice: None,
@@ -462,13 +464,13 @@ impl UiApp {
     fn start_scan(&mut self, ctx: &egui::Context) {
         self.stage = Stage::Scanning;
         let Some(job) = &self.job else { return };
-        let (apps, others) = (job.apps.clone(), job.others.clone());
+        let (apps, others, depth) = (job.apps.clone(), job.others.clone(), self.depth);
         let (tx, ctx) = (self.tx.clone(), ctx.clone());
         std::thread::spawn(move || {
             let mut items: Vec<Leftover> = Vec::new();
             let mut seen = std::collections::HashSet::new();
             for app in &apps {
-                for mut l in leftovers::scan(app, &others) {
+                for mut l in leftovers::scan(app, &others, depth) {
                     if seen.insert(l.label().to_lowercase()) {
                         if apps.len() > 1 {
                             l.owner = app.name.clone();
@@ -871,6 +873,22 @@ impl UiApp {
         self.reveal_selected = true;
     }
 
+    fn depth_picker(&mut self, ui: &mut Ui, p: &Pal) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Scan").color(p.weak));
+            for (d, label) in leftovers::Depth::ALL {
+                let tip = match d {
+                    leftovers::Depth::Safe => "Only traces with strong evidence",
+                    leftovers::Depth::Normal => "Strong evidence checked, weaker matches listed unchecked",
+                    leftovers::Depth::Deep => "Also names that start with the program's name. Review carefully.",
+                };
+                if ui.selectable_label(self.depth == d, label).on_hover_text(tip).clicked() {
+                    self.depth = d;
+                }
+            }
+        });
+    }
+
     fn batch_details(&mut self, ui: &mut Ui, p: &Pal) {
         let apps = self.targets();
         let total: u64 = apps.iter().map(|a| a.size_kb).sum();
@@ -889,6 +907,7 @@ impl UiApp {
         ui.add_enabled_ui(self.admin, |ui| {
             checkbox(ui, p, &mut self.restore_point, "Create a restore point first").on_disabled_hover_text("Needs administrator rights");
         });
+        self.depth_picker(ui, p);
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             if accent_button(ui, p, &format!("Uninstall {}", apps.len())).clicked() {
@@ -959,6 +978,7 @@ impl UiApp {
             checkbox(ui, p, &mut self.restore_point, "Create a restore point first")
                 .on_disabled_hover_text("Needs administrator rights");
         });
+        self.depth_picker(ui, p);
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             if accent_button(ui, p, "Uninstall").clicked() {

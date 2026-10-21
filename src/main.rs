@@ -47,7 +47,9 @@ fn cli(args: &[String]) {
             eprintln!("{} programs, {:?}", list.len(), t.elapsed());
         }
         "--scan" if args.len() > 1 => {
-            let q = args[1..].join(" ").to_lowercase();
+            let deep = args.iter().any(|a| a == "--deep");
+            let depth = if deep { leftovers::Depth::Deep } else { leftovers::Depth::Normal };
+            let q = args[1..].iter().filter(|a| *a != "--deep").cloned().collect::<Vec<_>>().join(" ").to_lowercase();
             let low = |a: &&apps::App| a.name.to_lowercase();
             let found = list
                 .iter()
@@ -61,7 +63,7 @@ fn cli(args: &[String]) {
             let others: Vec<_> = list.iter().filter(|a| !std::ptr::eq(*a, app)).cloned().collect();
             println!("{} {}", app.name, app.version);
             println!("names: {:?}  publisher: {:?}", leftovers::name_variants(app), leftovers::publisher_variants(app));
-            for l in leftovers::scan(app, &others) {
+            for l in leftovers::scan(app, &others, depth) {
                 let mark = if l.checked { "[x]" } else { "[ ]" };
                 println!("{mark} {:?}\t{}\t{}\t{}", l.confidence, l.label(), l.reason, ui::human(l.size));
             }
@@ -69,10 +71,10 @@ fn cli(args: &[String]) {
         }
         "--orphans" => {
             for l in leftovers::orphans(&list) {
-                println!("{}	{}", l.label(), ui::human(l.size));
+                println!("{}\t{}", l.label(), ui::human(l.size));
             }
             eprintln!("{:?}", t.elapsed());
         }
-        _ => eprintln!("usage: tracewipe [--list | --scan <name> | --orphans]"),
+        _ => eprintln!("usage: tracewipe [--list | --scan <name> [--deep] | --orphans]"),
     }
 }
