@@ -1,0 +1,266 @@
+//! Runs uninstallers and removes traces in a reversible way.
+
+use crate::apps::split_command;
+use crate::leftovers::{Kind, Leftover};
+use crate::reg::{self, wide};
+use std::os::windows::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::ptr::{null, null_mut};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WAIT_OBJECT_0};
+use windows_sys::Win32::System::JobObjects::*;
+use windows_sys::Win32::System::Threading::*;
+use windows_sys::Win32::UI::Shell::*;
+use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const ERROR_ELEVATION_REQUIRED: u32 = 740;
+
+pub fn is_admin() -> bool {
+    unsafe { IsUserAnAdmin() != 0 }
+}
+
+/// Restarts this program elevated. On success the caller should exit.
+pub fn relaunch_as_admin() -> bool {
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let exe = wide(&exe.to_string_lossy());
+    let verb = wide("runas");
+    let r = unsafe { ShellExecuteW(null_mut(), verb.as_ptr(), exe.as_ptr(), null(), null(), SW_SHOWNORMAL) };
+    r as isize > 32
+}
+
+struct Handle(HANDLE);
+impl Drop for Handle {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+}
+
+/// Runs an uninstaller and waits until it and every process it started have exited.
+/// Uninstallers that copy themselves to a temp folder and relaunch, like NSIS,
+/// are therefore not mistaken for finished. Stops waiting when `stop` is set.
+pub fn run_uninstaller(cmd: &str, stop: &AtomicBool) -> Result<(), String> {
+    let (exe, args) = split_command(cmd).ok_or("Could not parse the uninstall command")?;
+    let line = if args.is_empty() { format!("\"{exe}\"") } else { format!("\"{exe}\" {args}") };
+    let mut line_w = wide(&line);
+
+    unsafe {
+        let job = Handle(CreateJobObjectW(null(), null()));
+        let mut si: STARTUPINFOW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+        let ok = CreateProcessW(null(), line_w.as_mut_ptr(), null(), null(), 0, CREATE_SUSPENDED, null(), null(), &si, &mut pi);
+        if ok == 0 {
+            let err = GetLastError();
+            if err == ERROR_ELEVATION_REQUIRED {
+                return run_elevated(&exe, &args, stop);
+            }
+            return Err(format!("Could not start the uninstaller, error {err}"));
+        }
+        let process = Handle(pi.hProcess);
+        let thread = Handle(pi.hThread);
+        let in_job = !job.0.is_null() && AssignProcessToJobObject(job.0, process.0) != 0;
+        ResumeThread(thread.0);
+        drop(thread);
+
+        loop {
+            if stop.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            let done = if in_job {
+                let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = std::mem::zeroed();
+                let ok = QueryInformationJobObject(
+                    job.0,
+                    JobObjectBasicAccountingInformation,
+                    &mut info as *mut _ as *mut _,
+                    std::mem::size_of_val(&info) as u32,
+                    null_mut(),
+                );
+                ok == 0 || info.ActiveProcesses == 0
+            } else {
+                WaitForSingleObject(process.0, 0) == WAIT_OBJECT_0
+            };
+            if done {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+}
+
+fn run_elevated(exe: &str, args: &str, stop: &AtomicBool) -> Result<(), String> {
+    let verb = wide("runas");
+    let file = wide(exe);
+    let params = wide(args);
+    unsafe {
+        let mut sei: SHELLEXECUTEINFOW = std::mem::zeroed();
+        sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+        sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+        sei.lpVerb = verb.as_ptr();
+        sei.lpFile = file.as_ptr();
+        sei.lpParameters = if args.is_empty() { null() } else { params.as_ptr() };
+        sei.nShow = SW_SHOWNORMAL;
+        if ShellExecuteExW(&mut sei) == 0 {
+            return Err("The uninstaller needs administrator rights".into());
+        }
+        if sei.hProcess.is_null() {
+            return Ok(());
+        }
+        let p = Handle(sei.hProcess);
+        while WaitForSingleObject(p.0, 250) != WAIT_OBJECT_0 {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub struct Report {
+    pub removed: usize,
+    pub failed: Vec<(String, String)>,
+    pub backup: PathBuf,
+}
+
+pub fn backup_root() -> PathBuf {
+    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    base.join("Tracewipe").join("backups")
+}
+
+fn stamp() -> String {
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    secs.to_string()
+}
+
+fn safe_name(s: &str) -> String {
+    let s: String = s.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
+    s.trim().chars().take(60).collect()
+}
+
+/// Removes the selected traces. Files go to the Recycle Bin, registry keys
+/// and tasks are written to the backup folder before they are deleted.
+pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
+    let backup = backup_root().join(format!("{}-{}", stamp(), safe_name(app_name)));
+    let _ = std::fs::create_dir_all(&backup);
+    let mut report = Report { removed: 0, failed: Vec::new(), backup: backup.clone() };
+
+    let mut paths: Vec<&Path> = Vec::new();
+    for (i, l) in items.iter().enumerate() {
+        let res = match &l.kind {
+            Kind::Path { path, .. } => {
+                paths.push(path);
+                continue;
+            }
+            Kind::Key { hive, view, path } => export_key(&reg::display_path(*hive, *view, path), view.reg_switch(), &backup, i)
+                .and_then(|_| reg::delete_tree(*hive, *view, path).map_err(win_err)),
+            Kind::Value { hive, view, path, name } => export_key(&reg::display_path(*hive, *view, path), view.reg_switch(), &backup, i)
+                .and_then(|_| reg::delete_value(*hive, *view, path, name).map_err(win_err)),
+            Kind::Task { name } => delete_task(name, &backup, i),
+        };
+        match res {
+            Ok(()) => report.removed += 1,
+            Err(e) => report.failed.push((l.label(), e)),
+        }
+    }
+
+    for p in &paths {
+        if !p.exists() {
+            report.removed += 1;
+            continue;
+        }
+        match recycle(p) {
+            Ok(()) if !p.exists() => report.removed += 1,
+            Ok(()) => report.failed.push((p.display().to_string(), "Some files are in use".into())),
+            Err(e) => report.failed.push((p.display().to_string(), e)),
+        }
+    }
+    remove_empty_parents(&paths);
+
+    if std::fs::read_dir(&backup).map(|mut d| d.next().is_none()).unwrap_or(false) {
+        let _ = std::fs::remove_dir(&backup);
+    }
+    report
+}
+
+fn win_err(code: u32) -> String {
+    match code {
+        5 => "Access denied, run as administrator".into(),
+        c => format!("Hata {c}"),
+    }
+}
+
+fn hidden(cmd: &str) -> Command {
+    let mut c = Command::new(cmd);
+    c.creation_flags(CREATE_NO_WINDOW);
+    c
+}
+
+fn export_key(full: &str, switch: &str, dir: &Path, i: usize) -> Result<(), String> {
+    let file = dir.join(format!("{i:03}.reg"));
+    let out = hidden("reg.exe")
+        .args(["export", full])
+        .arg(&file)
+        .args(["/y", switch])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err("Backup failed, nothing was deleted".into())
+    }
+}
+
+fn delete_task(name: &str, dir: &Path, i: usize) -> Result<(), String> {
+    let q = hidden("schtasks.exe").args(["/Query", "/TN", name, "/XML"]).output().map_err(|e| e.to_string())?;
+    if !q.status.success() {
+        return Err("Could not read the task, run as administrator".into());
+    }
+    std::fs::write(dir.join(format!("{i:03}-task.xml")), &q.stdout).map_err(|e| e.to_string())?;
+    let d = hidden("schtasks.exe").args(["/Delete", "/TN", name, "/F"]).output().map_err(|e| e.to_string())?;
+    if d.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&d.stderr).trim().to_string())
+    }
+}
+
+fn recycle(p: &Path) -> Result<(), String> {
+    let mut from = wide(&p.to_string_lossy());
+    from.push(0);
+    let mut op: SHFILEOPSTRUCTW = unsafe { std::mem::zeroed() };
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.as_ptr();
+    op.fFlags = (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI) as u16;
+    let r = unsafe { SHFileOperationW(&mut op) };
+    if r == 0 && op.fAnyOperationsAborted == 0 {
+        Ok(())
+    } else {
+        Err(match r {
+            5 | 0x78 => "Access denied, run as administrator".into(),
+            0x20 => "File is in use, close the program".into(),
+            c => format!("Hata {c:#x}"),
+        })
+    }
+}
+
+/// Removes parent folders left empty by the cleanup. Protected paths are kept.
+fn remove_empty_parents(paths: &[&Path]) {
+    for p in paths {
+        let mut cur = p.parent();
+        while let Some(dir) = cur {
+            if crate::leftovers::is_protected(dir) || std::fs::remove_dir(dir).is_err() {
+                break;
+            }
+            cur = dir.parent();
+        }
+    }
+}
+
+/// Opens the folder in Explorer.
+pub fn reveal(p: &Path) {
+    let _ = Command::new("explorer.exe").arg(p).spawn();
+}
