@@ -153,6 +153,17 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
     let mut rules: Vec<(&str, String)> = Vec::new();
     let mut env_changed = false;
     for (i, l) in items.iter().enumerate() {
+        // Some keys, App Paths among them, are shared by the 32 and 64-bit views.
+        // Removing one copy removes the other, which then needs no backup.
+        let gone = match &l.kind {
+            Kind::Key { hive, view, path } => !reg::key_exists(*hive, *view, path),
+            Kind::Value { hive, view, path, name } => reg::Key::open(*hive, *view, path).and_then(|k| k.raw(name)).is_none(),
+            _ => false,
+        };
+        if gone {
+            report.removed += 1;
+            continue;
+        }
         let res = match &l.kind {
             Kind::Path { .. } => {
                 paths.push(l);

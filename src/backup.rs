@@ -216,6 +216,26 @@ mod tests {
         reg::delete_tree(Hive::Hkcu, View::V64, &key).unwrap();
     }
 
+    /// A key listed for both views but shared between them is removed once.
+    #[test]
+    fn shared_keys_listed_twice_are_removed_once() {
+        if !crate::remove::is_admin() {
+            return;
+        }
+        // App Paths is shared by the 32 and 64-bit views.
+        let key = format!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\tracewipe-test-{}.exe", std::process::id());
+        std::process::Command::new("reg.exe").args(["add", &format!("HKLM\\{key}"), "/ve", "/d", "x", "/f", "/reg:64"]).output().unwrap();
+        let items: Vec<Leftover> = [View::V64, View::V32]
+            .into_iter()
+            .filter(|v| reg::key_exists(Hive::Hklm, *v, &key))
+            .map(|view| Leftover::new(Kind::Key { hive: Hive::Hklm, view, path: key.clone() }, Confidence::High, ""))
+            .collect();
+        let report = crate::remove::clean("shared key test", &items);
+        assert!(report.failed.is_empty(), "{:?}", report.failed.iter().map(|f| &f.reason).collect::<Vec<_>>());
+        assert!(!reg::key_exists(Hive::Hklm, View::V64, &key) && !reg::key_exists(Hive::Hklm, View::V32, &key));
+        let _ = super::discard(&report.backup);
+    }
+
     /// 32-bit keys are written to backups through their WOW6432Node path.
     #[test]
     fn restores_a_32_bit_key() {
