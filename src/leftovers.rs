@@ -630,6 +630,89 @@ fn dedupe(mut v: Vec<Leftover>) -> Vec<Leftover> {
     out
 }
 
+/// Folders that belong to Windows, runtimes or drivers and have no Uninstall
+/// entry of their own. Compared in compact form.
+const SYSTEM_FOLDERS: &[&str] = &[
+    "internetexplorer", "windowsapps", "modifiablewindowsapps", "microsoftnet", "referenceassemblies", "dotnet",
+    "msbuild", "windowsdefender", "windowsdefenderadvancedthreatprotection", "windowsmail", "windowsmediaplayer",
+    "windowsnt", "windowsphotoviewer", "windowsportabledevices", "windowssecurity", "windowspowershell",
+    "windowssidebar", "uninstallinformation", "nvidiacorporation", "nvidia", "regid", "ssh", "usoshared",
+    "usoprivate", "softwaredistribution", "comms", "connecteddevicesplatform", "d3dscache", "crashdumps",
+    "packagecache", "chocolatey", "scoop", "peernetworking", "publishers", "virtualstore", "devicesync",
+    "microsoftedge", "microsoftupdatehealthtools", "windowsdefenderapplicationguard", "iis", "iisexpress",
+    "intel", "amd", "ati", "realtek", "dell", "hp", "lenovo", "asus", "msi", "oem", "drivers", "driverstore",
+    "mozillamaintenanceservice", "googleupdater", "edgeupdate", "edgewebview", "fontcache", "igfx",
+    "windowskits", "wsl", "applicationverifier", "windowsappcertificationkit", "windowsperformanceanalyzer",
+    "toastnotificationmanagercompat", "placeholdertilelogofolder", "peerdistrepub", "elevateddiagnostics",
+    "visualstudiosetup", "downloadedinstallations", "shimgen",
+];
+
+/// How long a folder must sit untouched before it counts as unclaimed.
+const ORPHAN_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
+
+/// Newest modification time of a folder and its direct children.
+fn last_touched(p: &Path) -> Option<std::time::SystemTime> {
+    let mut newest = fs::metadata(p).and_then(|m| m.modified()).ok()?;
+    if let Ok(rd) = fs::read_dir(p) {
+        for e in rd.flatten().take(500) {
+            if let Ok(t) = e.metadata().and_then(|m| m.modified()) {
+                newest = newest.max(t);
+            }
+        }
+    }
+    Some(newest)
+}
+
+/// Top-level folders in the usual program locations that no installed program
+/// claims by name, publisher or location, and that nothing has written to for
+/// a month. Every result comes unchecked: this is a list to look through.
+pub fn orphans(apps: &[App]) -> Vec<Leftover> {
+    let pl = places();
+    let mut claimed: HashSet<String> = HashSet::new();
+    for a in apps {
+        claimed.extend(name_variants(a));
+        claimed.extend(publisher_variants(a));
+    }
+    let locations: Vec<String> = apps.iter().filter_map(|a| a.location.as_ref()).map(|l| lower(l)).collect();
+    let cutoff = std::time::SystemTime::now() - ORPHAN_AGE;
+    let mut out: Vec<Leftover> = pl
+        .file_roots
+        .par_iter()
+        .flat_map_iter(|root| {
+            let mut v = Vec::new();
+            for (name, path, is_dir) in read_dir_names(root) {
+                if !is_dir || name.starts_with(['.', '{', '$']) {
+                    continue;
+                }
+                let c = compact(&name);
+                if c.len() < 3 || GENERIC.contains(&c.as_str()) || SYSTEM_FOLDERS.iter().any(|s| c.starts_with(s)) {
+                    continue;
+                }
+                if claimed.contains(&c) || claimed.iter().any(|n| n.len() >= 5 && (c.starts_with(n.as_str()) || n.starts_with(c.as_str()))) {
+                    continue;
+                }
+                let l = lower(&path);
+                let prefix = format!("{l}\\");
+                if is_protected(&path) || locations.iter().any(|o| *o == l || o.starts_with(&prefix) || l.starts_with(&format!("{o}\\"))) {
+                    continue;
+                }
+                if last_touched(&path).is_none_or(|t| t > cutoff) {
+                    continue;
+                }
+                v.push(Leftover::new(Kind::Path { path, dir: true }, Confidence::Medium, "No installed program claims this folder, untouched for a month"));
+            }
+            v
+        })
+        .collect();
+    out.par_iter_mut().for_each(|l| {
+        if let Kind::Path { path, .. } = &l.kind {
+            l.size = dir_size(path);
+        }
+    });
+    out.sort_by_key(|l| std::cmp::Reverse(l.size));
+    out
+}
+
 fn read_dir_names(p: &Path) -> Vec<(String, PathBuf, bool)> {
     let Ok(rd) = fs::read_dir(p) else { return Vec::new() };
     rd.flatten()

@@ -82,6 +82,7 @@ struct Job {
 impl Job {
     fn title(&self) -> String {
         match self.apps.as_slice() {
+            [] => "unclaimed folders".to_string(),
             [one] => one.name.clone(),
             many => format!("{} programs", many.len()),
         }
@@ -386,6 +387,17 @@ impl UiApp {
         });
     }
 
+    fn start_orphans(&mut self, ctx: &egui::Context) {
+        self.error = None;
+        self.job = Some(Job { apps: Vec::new(), others: self.apps.clone(), forced: true, current: 0 });
+        self.stage = Stage::Scanning;
+        let (apps, tx, ctx) = (self.apps.clone(), self.tx.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let _ = tx.send(Msg::Scanned(leftovers::orphans(&apps)));
+            ctx.request_repaint();
+        });
+    }
+
     fn start_scan(&mut self, ctx: &egui::Context) {
         self.stage = Stage::Scanning;
         let Some(job) = &self.job else { return };
@@ -514,10 +526,17 @@ impl UiApp {
             });
 
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                ui.add_enabled_ui(enabled, |ui| {
-                    if ui.add(egui::Button::new("Backups").min_size(Vec2::new(0.0, 28.0))).on_hover_text("Restore what earlier cleanups removed").clicked() {
-                        self.open_backups(ui.ctx(), None);
-                    }
+                ui.add_enabled_ui(enabled && !self.loading, |ui| {
+                    ui.menu_button("More", |ui| {
+                        if ui.button("Backups").on_hover_text("Restore what earlier cleanups removed").clicked() {
+                            self.open_backups(ui.ctx(), None);
+                            ui.close_menu();
+                        }
+                        if ui.button("Unclaimed folders").on_hover_text("Program folders that no installed program claims").clicked() {
+                            self.start_orphans(ui.ctx());
+                            ui.close_menu();
+                        }
+                    });
                 });
                 ui.add_enabled_ui(enabled && !self.loading, |ui| {
                     if ui.add(egui::Button::new(icon(IC_REFRESH, 14.0)).min_size(Vec2::splat(28.0))).on_hover_text("Refresh (F5)").clicked()
@@ -1010,7 +1029,8 @@ impl UiApp {
         let mut go_back = false;
         let mut clean = false;
         Frame::new().inner_margin(Margin { left: 16, right: 16, top: 14, bottom: 8 }).show(ui, |ui| {
-            ui.label(RichText::new(format!("Traces of {name}")).size(20.0).color(p.text));
+            let title = if name == "unclaimed folders" { "Unclaimed folders".to_string() } else { format!("Traces of {name}") };
+            ui.label(RichText::new(title).size(20.0).color(p.text));
             ui.add_space(4.0);
             let sel: Vec<&Leftover> = items.iter().filter(|l| l.checked).collect();
             let bytes: u64 = sel.iter().map(|l| l.size).sum();

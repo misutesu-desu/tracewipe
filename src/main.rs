@@ -66,6 +66,12 @@ fn cli(args: &[String]) {
             }
             eprintln!("{:?}", t.elapsed());
         }
-        _ => eprintln!("usage: tracewipe [--list | --scan <name>]"),
+        "--orphans" => {
+            for l in leftovers::orphans(&list) {
+                println!("{}	{}", l.label(), ui::human(l.size));
+            }
+            eprintln!("{:?}", t.elapsed());
+        }
+        _ => eprintln!("usage: tracewipe [--list | --scan <name> | --orphans]"),
     }
 }
