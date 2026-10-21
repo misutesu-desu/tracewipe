@@ -1,0 +1,17 @@
+<!--
+  Runs the integration test in Windows Sandbox, a throwaway copy of Windows.
+  Build first with `cargo build --release`, then open this file. Edit the
+  host path below if the repository lives somewhere else.
+-->
+<Configuration>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>C:\src\tracewipe</HostFolder>
+      <SandboxFolder>C:\tracewipe</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -NoExit -ExecutionPolicy Bypass -File C:\tracewipe\tests\integration.ps1 -Exe C:\tracewipe\target\release\tracewipe.exe</Command>
+  </LogonCommand>
+</Configuration>
