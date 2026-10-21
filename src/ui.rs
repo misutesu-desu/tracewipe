@@ -315,11 +315,7 @@ impl UiApp {
                 Col::Publisher => (a.publisher.to_lowercase(), 0),
                 Col::Version => (a.version.clone(), 0),
                 Col::Size => (String::new(), a.size_kb),
-                Col::Date => {
-                    let d = &a.install_date;
-                    let iso = if d.len() == 10 { format!("{}{}{}", &d[6..], &d[3..5], &d[..2]) } else { d.clone() };
-                    (iso, 0)
-                }
+                Col::Date => (a.install_date.clone(), 0),
             }
         };
         v.sort_by_cached_key(|&i| key(&apps[i]));

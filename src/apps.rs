@@ -130,7 +130,7 @@ fn read(k: &Key, hive: Hive, view: View, key_name: String) -> Option<App> {
 
 fn format_date(d: &str) -> String {
     if d.len() == 8 && d.bytes().all(|c| c.is_ascii_digit()) {
-        format!("{}.{}.{}", &d[6..8], &d[4..6], &d[..4])
+        format!("{}-{}-{}", &d[..4], &d[4..6], &d[6..8])
     } else {
         d.to_string()
     }
