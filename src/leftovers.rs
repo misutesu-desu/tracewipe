@@ -257,6 +257,8 @@ pub fn words(s: &str) -> Vec<String> {
             '(' | '[' | '{' => depth += 1,
             ')' | ']' | '}' => depth = (depth - 1).max(0),
             '®' | '™' | '©' => {}
+            // Notepad++ must not become Notepad. Its Store package is NotepadPlusPlus.
+            '+' if depth == 0 => clean.push_str("plus"),
             _ if depth == 0 => clean.push(c),
             _ => {}
         }
@@ -554,6 +556,12 @@ pub(crate) struct Matcher {
 
 impl Matcher {
     fn new(app: &App, others: &[App]) -> Self {
+        // A Store package with the program's own name is part of it, like the
+        // context menu package Notepad++ installs, not a second owner of its traces.
+        let own_name = compact(&app.name);
+        let companion = |o: &App| matches!(o.source, crate::apps::Source::Store { .. }) && compact(&o.name) == own_name;
+        let others: Vec<App> = others.iter().filter(|o| !companion(o)).cloned().collect();
+        let others = others.as_slice();
         let names = name_variants(app);
         let own = app.location.as_ref().map(|p| lower(p));
         // When two programs point at the same folder, the one named in the path owns it.
@@ -1246,8 +1254,9 @@ mod tests {
     fn words_drop_versions_and_arch() {
         assert_eq!(compact("Mozilla Firefox (x64 en-US)"), "mozillafirefox");
         assert_eq!(compact("7-Zip 23.01 (x64)"), "7zip");
-        assert_eq!(compact("Notepad++ (64-bit x64)"), "notepad");
-        assert_eq!(compact("Microsoft Visual C++ 2015 Redistributable"), "microsoftvisualcredistributable");
+        assert_eq!(compact("Notepad++ (64-bit x64)"), "notepadplusplus");
+        assert_eq!(compact("NotepadPlusPlus"), "notepadplusplus");
+        assert_eq!(compact("Microsoft Visual C++ 2015 Redistributable"), "microsoftvisualcplusplusredistributable");
         assert_eq!(compact("3DMark"), "3dmark");
         assert_eq!(compact("Python 3.12.1 (64-bit)"), "python");
     }
