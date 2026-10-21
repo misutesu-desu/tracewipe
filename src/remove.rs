@@ -2,6 +2,7 @@
 
 use crate::apps::split_command;
 use crate::leftovers::{Kind, Leftover};
+use crate::procs::{self, Proc};
 use crate::reg::{self, wide, Hive, View};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -120,9 +121,24 @@ fn run_elevated(exe: &str, args: &str, stop: &AtomicBool) -> Result<(), String> 
     Ok(())
 }
 
+pub struct Failure {
+    pub label: String,
+    pub reason: String,
+    /// The file or folder that stayed, so it can be retried or queued for restart.
+    pub item: Option<Leftover>,
+    /// Processes holding files in it open.
+    pub lockers: Vec<Proc>,
+}
+
+impl Failure {
+    fn new(label: String, reason: String) -> Self {
+        Failure { label, reason, item: None, lockers: Vec::new() }
+    }
+}
+
 pub struct Report {
     pub removed: usize,
-    pub failed: Vec<(String, String)>,
+    pub failed: Vec<Failure>,
     pub backup: PathBuf,
 }
 
@@ -148,13 +164,13 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
     let _ = std::fs::create_dir_all(&backup);
     let mut report = Report { removed: 0, failed: Vec::new(), backup: backup.clone() };
 
-    let mut paths: Vec<&Path> = Vec::new();
+    let mut paths: Vec<&Leftover> = Vec::new();
     let mut rules: Vec<(&str, String)> = Vec::new();
     let mut env_changed = false;
     for (i, l) in items.iter().enumerate() {
         let res = match &l.kind {
-            Kind::Path { path, .. } => {
-                paths.push(path);
+            Kind::Path { .. } => {
+                paths.push(l);
                 continue;
             }
             Kind::Key { hive, view, path } => export_key(&reg::display_path(*hive, *view, path), view.reg_switch(), &backup, i)
@@ -178,7 +194,7 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
         };
         match res {
             Ok(()) => report.removed += 1,
-            Err(e) => report.failed.push((l.label(), e)),
+            Err(e) => report.failed.push(Failure::new(l.label(), e)),
         }
     }
 
@@ -187,7 +203,7 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
         let failed = delete_firewall_rules(&ids);
         for (id, label) in rules {
             if failed.contains(&id) {
-                report.failed.push((label, "Could not remove the firewall rule, run as administrator".into()));
+                report.failed.push(Failure::new(label, "Could not remove the firewall rule, run as administrator".into()));
             } else {
                 report.removed += 1;
             }
@@ -197,23 +213,52 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
         broadcast_environment();
     }
 
-    for p in &paths {
+    let mut gone: Vec<&Path> = Vec::new();
+    for l in &paths {
+        let Kind::Path { path: p, .. } = &l.kind else { continue };
         if !p.exists() {
             report.removed += 1;
             continue;
         }
-        match recycle(p) {
-            Ok(()) if !p.exists() => report.removed += 1,
-            Ok(()) => report.failed.push((p.display().to_string(), "Some files are in use".into())),
-            Err(e) => report.failed.push((p.display().to_string(), e)),
+        let res = match recycle(p) {
+            Ok(()) if !p.exists() => Ok(()),
+            Ok(()) => Err("Some files are in use".to_string()),
+            Err(e) => Err(e),
+        };
+        match res {
+            Ok(()) => {
+                report.removed += 1;
+                gone.push(p);
+            }
+            Err(e) => {
+                let lockers = procs::lockers(std::slice::from_ref(p));
+                let reason = if lockers.is_empty() {
+                    e
+                } else {
+                    let names: Vec<&str> = lockers.iter().map(|p| p.name.as_str()).collect();
+                    format!("In use by {}", names.join(", "))
+                };
+                report.failed.push(Failure { label: l.label(), reason, item: Some((*l).clone()), lockers });
+            }
         }
     }
-    remove_empty_parents(&paths);
+    remove_empty_parents(&gone);
 
     if std::fs::read_dir(&backup).map(|mut d| d.next().is_none()).unwrap_or(false) {
         let _ = std::fs::remove_dir(&backup);
     }
     report
+}
+
+/// Queues files that could not be removed for deletion at the next restart.
+pub fn remove_at_restart(items: &[Leftover]) -> Vec<Failure> {
+    items
+        .iter()
+        .filter_map(|l| {
+            let Kind::Path { path, .. } = &l.kind else { return None };
+            procs::delete_at_restart(path).err().map(|e| Failure::new(l.label(), e))
+        })
+        .collect()
 }
 
 fn win_err(code: u32) -> String {

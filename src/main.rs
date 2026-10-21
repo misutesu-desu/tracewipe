@@ -3,6 +3,7 @@
 mod apps;
 mod deep;
 mod leftovers;
+mod procs;
 mod reg;
 mod remove;
 mod theme;

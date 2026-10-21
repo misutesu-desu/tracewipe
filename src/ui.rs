@@ -1,5 +1,6 @@
 use crate::apps::{self, App};
 use crate::leftovers::{self, Confidence, Kind, Leftover};
+use crate::procs;
 use crate::reg;
 use crate::remove::{self, Report};
 use crate::theme::{self, Pal, ICONS};
@@ -68,6 +69,8 @@ pub struct UiApp {
     others: Vec<App>,
     forced: bool,
     error: Option<String>,
+    /// Result of an action on the finish screen.
+    notice: Option<String>,
     stage: Stage,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -98,6 +101,7 @@ impl UiApp {
             others: Vec::new(),
             forced: false,
             error: None,
+            notice: None,
             stage: Stage::List,
             tx,
             rx,
@@ -680,7 +684,11 @@ impl UiApp {
     fn done(&mut self, ui: &mut Ui, p: &Pal) {
         let Stage::Done(r) = &self.stage else { return };
         let mut back = false;
+        let mut retry = false;
+        let mut at_restart = false;
         let backup = r.backup.clone();
+        let stuck: Vec<Leftover> = r.failed.iter().filter_map(|f| f.item.clone()).collect();
+        let lockers: Vec<procs::Proc> = r.failed.iter().flat_map(|f| f.lockers.iter().cloned()).collect();
         Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
             ui.label(RichText::new("Cleanup finished").size(20.0).color(p.text));
             ui.add_space(6.0);
@@ -697,20 +705,58 @@ impl UiApp {
                 ui.add_space(10.0);
                 ui.label(RichText::new(format!("{} traces could not be removed", r.failed.len())).color(p.error_text));
                 egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
-                    for (what, why) in &r.failed {
-                        ui.label(RichText::new(what).color(p.label));
-                        ui.label(RichText::new(why).size(12.0).color(p.error_text));
+                    for f in &r.failed {
+                        ui.label(RichText::new(&f.label).color(p.label));
+                        ui.label(RichText::new(&f.reason).size(12.0).color(p.error_text));
                         ui.add_space(4.0);
                     }
                 });
             }
-            ui.add_space(14.0);
-            if accent_button(ui, p, "Back to list").clicked() {
-                back = true;
+            if let Some(msg) = &self.notice {
+                ui.add_space(8.0);
+                ui.label(RichText::new(msg).color(p.weak));
             }
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                if accent_button(ui, p, "Back to list").clicked() {
+                    back = true;
+                }
+                if !lockers.is_empty() {
+                    let names: Vec<&str> = lockers.iter().map(|l| l.name.as_str()).collect();
+                    if ui
+                        .add(egui::Button::new(format!("Close {} and retry", names.join(", "))).min_size(Vec2::new(0.0, 28.0)))
+                        .on_hover_text("Ends those programs. Unsaved work in them is lost.")
+                        .clicked()
+                    {
+                        retry = true;
+                    }
+                }
+                if !stuck.is_empty()
+                    && ui
+                        .add(egui::Button::new("Remove at next restart").min_size(Vec2::new(0.0, 28.0)))
+                        .on_hover_text("Windows deletes these files before anything can lock them again. Needs administrator rights.")
+                        .clicked()
+                {
+                    at_restart = true;
+                }
+            });
         });
+        let ctx = ui.ctx().clone();
         if back {
-            self.back_to_list(&ui.ctx().clone());
+            self.notice = None;
+            self.back_to_list(&ctx);
+        } else if retry {
+            procs::terminate(&lockers);
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            self.notice = None;
+            self.start_clean(&ctx, stuck);
+        } else if at_restart {
+            let failed = remove::remove_at_restart(&stuck);
+            self.notice = Some(if failed.is_empty() {
+                format!("{} items will be removed when Windows restarts.", stuck.len())
+            } else {
+                failed[0].reason.clone()
+            });
         }
     }
 }
