@@ -34,6 +34,7 @@ enum Msg {
     Uninstalled(Result<(), String>),
     Scanned(Vec<Leftover>),
     Cleaned(Report),
+    Warning(String),
     Backups(Vec<backup::Backup>),
     Restored(Vec<String>),
 }
@@ -69,6 +70,7 @@ pub struct UiApp {
     selected: Option<usize>,
     reveal_selected: bool,
     quiet: bool,
+    restore_point: bool,
     target: Option<App>,
     others: Vec<App>,
     forced: bool,
@@ -103,6 +105,7 @@ impl UiApp {
             selected: None,
             reveal_selected: false,
             quiet: false,
+            restore_point: false,
             target: None,
             others: Vec::new(),
             forced: false,
@@ -192,6 +195,7 @@ impl UiApp {
                     self.stage = Stage::Review { items, still_installed: still };
                 }
                 Msg::Cleaned(r) => self.stage = Stage::Done(r),
+                Msg::Warning(w) => self.error = Some(w),
                 Msg::Backups(l) => {
                     if let Stage::Backups { list, .. } = &mut self.stage {
                         *list = Some(l);
@@ -243,11 +247,23 @@ impl UiApp {
         self.stage = Stage::Uninstalling;
         self.stop.store(false, Ordering::Relaxed);
         let (tx, stop, ctx) = (self.tx.clone(), self.stop.clone(), ctx.clone());
+        let restore_point = self.restore_point.then(|| format!("Before uninstalling {}", self.target.as_ref().map(|a| a.name.as_str()).unwrap_or("")));
         std::thread::spawn(move || {
             if !close.is_empty() {
                 procs::close(&close, std::time::Duration::from_secs(3));
             }
+            let seq = match restore_point.map(|d| remove::begin_restore_point(&d)) {
+                Some(Ok(s)) => Some(s),
+                Some(Err(e)) => {
+                    let _ = tx.send(Msg::Warning(e));
+                    None
+                }
+                None => None,
+            };
             let r = remove::run_uninstaller(&cmd, &stop);
+            if let Some(s) = seq {
+                remove::end_restore_point(s);
+            }
             let _ = tx.send(Msg::Uninstalled(r));
             ctx.request_repaint();
         });
@@ -604,8 +620,12 @@ impl UiApp {
         let has_quiet = a.quiet_uninstall.is_some() || (a.msi && apps::is_guid(&a.key_name));
         if has_quiet {
             checkbox(ui, p, &mut self.quiet, "Quiet uninstall");
-            ui.add_space(6.0);
         }
+        ui.add_enabled_ui(self.admin, |ui| {
+            checkbox(ui, p, &mut self.restore_point, "Create a restore point first")
+                .on_disabled_hover_text("Needs administrator rights");
+        });
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
             if accent_button(ui, p, "Uninstall").clicked() {
                 self.start(ui.ctx(), false);

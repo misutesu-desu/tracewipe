@@ -382,3 +382,37 @@ fn remove_empty_parents(paths: &[&Path]) {
 pub fn reveal(p: &Path) {
     let _ = Command::new("explorer.exe").arg(p).spawn();
 }
+
+/// Starts a System Restore point. Returns its sequence number for `end_restore_point`.
+/// Needs administrator rights and System Protection turned on for the drive.
+pub fn begin_restore_point(description: &str) -> Result<i64, String> {
+    use windows_sys::Win32::System::Restore::*;
+    let mut info: RESTOREPOINTINFOW = unsafe { std::mem::zeroed() };
+    info.dwEventType = BEGIN_SYSTEM_CHANGE;
+    info.dwRestorePtType = APPLICATION_UNINSTALL;
+    // The struct is packed, so build the text in a local array and copy it in whole.
+    let mut text = [0u16; MAX_DESC_W as usize];
+    for (d, s) in text.iter_mut().zip(description.encode_utf16().take(MAX_DESC_W as usize - 1)) {
+        *d = s;
+    }
+    info.szDescription = text;
+    let mut status: STATEMGRSTATUS = unsafe { std::mem::zeroed() };
+    if unsafe { SRSetRestorePointW(&info, &mut status) } == 0 {
+        let code = status.nStatus;
+        return Err(match code {
+            1058 => "System Protection is off, no restore point was made".into(),
+            5 => "A restore point needs administrator rights".into(),
+            c => format!("No restore point was made, error {c}"),
+        });
+    }
+    Ok(status.llSequenceNumber)
+}
+
+pub fn end_restore_point(sequence: i64) {
+    use windows_sys::Win32::System::Restore::*;
+    let mut info: RESTOREPOINTINFOW = unsafe { std::mem::zeroed() };
+    info.dwEventType = END_SYSTEM_CHANGE;
+    info.llSequenceNumber = sequence;
+    let mut status: STATEMGRSTATUS = unsafe { std::mem::zeroed() };
+    unsafe { SRSetRestorePointW(&info, &mut status) };
+}
