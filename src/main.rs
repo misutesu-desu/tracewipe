@@ -45,12 +45,15 @@ const USAGE: &str = "usage:
 scans. With --yes it also removes the checked traces into a backup.
 --force skips the uninstaller.";
 
+/// Best match for a name: exact, then prefix, then substring. Uninstall
+/// entries are tried before packages, since Notepad++ for example also
+/// ships a Store package named Notepad++ for its context menu.
 fn find<'a>(list: &'a [apps::App], q: &str) -> Option<&'a apps::App> {
-    let low = |a: &&apps::App| a.name.to_lowercase();
-    list.iter()
-        .find(|a| low(a) == q)
-        .or_else(|| list.iter().find(|a| low(a).starts_with(q)))
-        .or_else(|| list.iter().find(|a| low(a).contains(q)))
+    let tests: [&dyn Fn(&str) -> bool; 3] = [&|n| n == q, &|n| n.starts_with(q), &|n| n.contains(q)];
+    let pick = |registry_only: bool| {
+        tests.iter().find_map(|t| list.iter().find(|a| (!registry_only || a.source == apps::Source::Registry) && t(&a.name.to_lowercase())))
+    };
+    pick(true).or_else(|| pick(false))
 }
 
 fn print_items(items: &[leftovers::Leftover]) {
