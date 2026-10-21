@@ -127,6 +127,35 @@ pub fn compact(s: &str) -> String {
     words(s).concat()
 }
 
+/// Lowercase letters and digits only, versions kept.
+fn raw_compact(s: &str) -> String {
+    s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect()
+}
+
+/// Version-like words in a name, without a leading v.
+fn version_tokens(s: &str) -> Vec<String> {
+    s.split(|c: char| c.is_whitespace() || c == '(' || c == ')')
+        .map(|t| t.to_lowercase())
+        .filter(|t| is_version(t))
+        .map(|t| t.trim_start_matches('v').to_string())
+        .collect()
+}
+
+fn app_versions(app: &App) -> Vec<String> {
+    let mut v = version_tokens(&app.name);
+    if !app.version.is_empty() && is_version(&app.version.to_lowercase()) {
+        v.push(app.version.to_lowercase().trim_start_matches('v').to_string());
+    }
+    let mm: Vec<String> = v.iter().filter_map(|s| {
+        let parts: Vec<&str> = s.split('.').collect();
+        (parts.len() > 2).then(|| format!("{}.{}", parts[0], parts[1]))
+    }).collect();
+    v.extend(mm);
+    v.sort();
+    v.dedup();
+    v
+}
+
 fn usable(v: &str) -> bool {
     v.chars().count() >= 3 && v.chars().any(|c| c.is_alphabetic()) && !GENERIC.contains(&v) && !has_hex_id(v)
 }
@@ -289,6 +318,8 @@ pub fn is_protected(p: &Path) -> bool {
 
 struct Matcher {
     names: Vec<String>,
+    /// Versions from the name and version fields, with their major.minor forms.
+    versions: Vec<String>,
     publishers: Vec<String>,
     location: Option<String>,
     other_names: HashSet<String>,
@@ -326,6 +357,7 @@ impl Matcher {
         let nested_others = location.as_ref().is_some_and(|s| other_locations.iter().any(|o| o.starts_with(&format!("{s}\\"))));
         Matcher {
             names,
+            versions: app_versions(app),
             publishers: publisher_variants(app),
             location,
             other_names: others.iter().flat_map(name_variants).collect(),
@@ -335,12 +367,33 @@ impl Matcher {
         }
     }
 
+    /// A name that carries a version, like "Python 3.11" or "Python311",
+    /// only matches when the version is this program's version.
     fn name_hit(&self, entry: &str) -> Option<Confidence> {
         let c = compact(entry);
-        if !self.names.contains(&c) {
-            return None;
+        if self.names.contains(&c) {
+            if let Some(v) = version_tokens(entry).first() {
+                if self.versions.is_empty() {
+                    return Some(Confidence::Medium);
+                }
+                return self.version_matches(v).then_some(Confidence::High);
+            }
+            return Some(if self.other_names.contains(&c) { Confidence::Medium } else { Confidence::High });
         }
-        Some(if self.other_names.contains(&c) { Confidence::Medium } else { Confidence::High })
+        let raw = raw_compact(entry);
+        for n in &self.names {
+            if let Some(rest) = raw.strip_prefix(n.as_str()) {
+                let digits = !rest.is_empty() && rest.len() <= 4 && rest.bytes().all(|b| b.is_ascii_digit());
+                if digits && self.versions.iter().any(|v| v.replace('.', "") == rest) {
+                    return Some(Confidence::High);
+                }
+            }
+        }
+        None
+    }
+
+    fn version_matches(&self, v: &str) -> bool {
+        self.versions.iter().any(|a| a == v || a.starts_with(&format!("{v}.")) || v.starts_with(&format!("{a}.")))
     }
 
     fn pub_hit(&self, entry: &str) -> bool {
@@ -479,7 +532,23 @@ fn scan_file_root(root: &Path, m: &Matcher) -> Vec<Leftover> {
             continue;
         }
         if let Some(c) = m.name_hit(&name) {
-            out.push(Leftover::new(Kind::Path { path, dir: true }, c, reason_for(c, "Same name as the program")));
+            // A shared folder such as Programs\Python may hold a versioned
+            // subfolder that is clearly this program's. Prefer that one.
+            let versioned: Vec<PathBuf> = if c == Confidence::Medium {
+                read_dir_names(&path)
+                    .into_iter()
+                    .filter(|(cn, _, cd)| *cd && m.name_hit(cn) == Some(Confidence::High))
+                    .map(|(_, cp, _)| cp)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if versioned.is_empty() {
+                out.push(Leftover::new(Kind::Path { path, dir: true }, c, reason_for(c, "Same name as the program")));
+            }
+            for cp in versioned {
+                out.push(Leftover::new(Kind::Path { path: cp, dir: true }, Confidence::High, "Folder for this version of the program"));
+            }
         } else if m.pub_hit(&name) {
             let mut found = false;
             for (cn, cp, cd) in read_dir_names(&path) {
@@ -729,6 +798,18 @@ mod tests {
         let b = app("Python 3.11.4 (64-bit)", "Python Software Foundation", "{B}", None);
         let m = Matcher::new(&a, &[b]);
         assert_eq!(m.name_hit("Python"), Some(Confidence::Medium));
+    }
+
+    #[test]
+    fn versioned_names_need_the_same_version() {
+        let mut a = app("Python 3.11.9 (64-bit)", "Python Software Foundation", "{A}", None);
+        a.version = "3.11.9150.0".into();
+        let m = Matcher::new(&a, &[]);
+        assert_eq!(m.name_hit("Python 3.11"), Some(Confidence::High));
+        assert_eq!(m.name_hit("Python311"), Some(Confidence::High));
+        assert_eq!(m.name_hit("Python 3.13"), None);
+        assert_eq!(m.name_hit("Python313"), None);
+        assert_eq!(m.name_hit("Python"), Some(Confidence::High));
     }
 
     #[test]
