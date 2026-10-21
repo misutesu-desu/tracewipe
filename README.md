@@ -27,9 +27,6 @@ programs, runs their own uninstaller, waits for it to really finish and then
 looks for the folders, registry keys, services, tasks and other entries the
 uninstaller did not remove. You see the list before anything is deleted.
 
-The name comes from Nietono no Shana, the sword in Shakugan no Shana that cuts
-through what is left behind.
-
 ## What it finds
 
 Programs come from four places: the Uninstall registry keys, Microsoft Store
