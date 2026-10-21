@@ -799,7 +799,7 @@ impl UiApp {
             }
             x += w;
         }
-        ui.painter().hline(hr.x_range(), hr.bottom() - 0.5, Stroke::new(1.0, p.divider));
+        ui.painter().hline(hr.x_range(), hr.bottom() - 0.5, Stroke::new(1.0_f32, p.divider));
 
         if let Some(n) = self.list_notice.clone() {
             ui.horizontal(|ui| {
@@ -1189,7 +1189,7 @@ impl UiApp {
                 back = true;
             }
         });
-        ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, p.divider));
+        ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0_f32, p.divider));
         match list {
             None => busy(ui, p, "Reading backups", ""),
             Some(l) if l.is_empty() => {
@@ -1369,7 +1369,7 @@ impl UiApp {
                 }
             });
         });
-        ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, p.divider));
+        ui.painter().hline(ui.max_rect().x_range(), ui.cursor().top(), Stroke::new(1.0_f32, p.divider));
 
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1603,9 +1603,9 @@ fn paint_check(ui: &Ui, p: &Pal, r: Rect, on: bool) {
             egui::pos2(r.left() + 7.5, r.bottom() - 5.0),
             egui::pos2(r.right() - 4.0, r.top() + 5.0),
         ];
-        painter.line(pts.to_vec(), Stroke::new(1.6, p.on_accent));
+        painter.line(pts.to_vec(), Stroke::new(1.6_f32, p.on_accent));
     } else {
-        painter.rect_stroke(r, 4.0, Stroke::new(1.0, p.control_stroke), StrokeKind::Inside);
+        painter.rect_stroke(r, 4.0, Stroke::new(1.0_f32, p.control_stroke), StrokeKind::Inside);
     }
 }
 
@@ -1620,7 +1620,7 @@ fn checkbox(ui: &mut Ui, p: &Pal, v: &mut bool, text: &str) -> egui::Response {
     paint_check(ui, p, br, *v);
     ui.painter().galley(egui::pos2(r.left() + 26.0, r.center().y - g.size().y / 2.0), g, p.text);
     if resp.has_focus() {
-        ui.painter().rect_stroke(br.expand(3.0), 5.0, Stroke::new(2.0, p.text), StrokeKind::Outside);
+        ui.painter().rect_stroke(br.expand(3.0), 5.0, Stroke::new(2.0_f32, p.text), StrokeKind::Outside);
     }
     resp
 }
@@ -1664,7 +1664,7 @@ fn search_box(ui: &mut Ui, p: &Pal, text: &mut String, id: egui::Id, width: f32)
     let r = out.response.rect;
     let focused = out.inner.has_focus();
     if !ui.ctx().theme().default_visuals().dark_mode {
-        ui.painter().rect_stroke(r, 4.0, Stroke::new(1.0, p.line), StrokeKind::Inside);
+        ui.painter().rect_stroke(r, 4.0, Stroke::new(1.0_f32, p.line), StrokeKind::Inside);
     }
     let (w, c) = if focused { (2.0, p.accent_text) } else { (1.0, p.control_stroke) };
     ui.painter().hline(r.x_range().shrink(2.0), r.bottom() - w / 2.0, Stroke::new(w, c));

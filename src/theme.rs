@@ -154,7 +154,7 @@ fn apply(s: &mut egui::Style, p: &Pal, theme: Theme) {
     v.window_fill = p.field;
     v.extreme_bg_color = p.field;
     v.faint_bg_color = p.hover;
-    v.window_stroke = Stroke::new(1.0, p.popup_stroke);
+    v.window_stroke = Stroke::new(1.0_f32, p.popup_stroke);
     v.window_corner_radius = CornerRadius::same(8);
     v.menu_corner_radius = CornerRadius::same(8);
     let sh = Shadow { offset: [0, 8], blur: 16, spread: 0, color: Color32::from_black_alpha(71) };
@@ -164,23 +164,23 @@ fn apply(s: &mut egui::Style, p: &Pal, theme: Theme) {
     v.error_fg_color = p.error_text;
     v.warn_fg_color = p.error_text;
     v.selection.bg_fill = p.sel;
-    v.selection.stroke = Stroke::new(1.0, p.text);
-    v.text_cursor.stroke = Stroke::new(2.0, p.accent_text);
+    v.selection.stroke = Stroke::new(1.0_f32, p.text);
+    v.text_cursor.stroke = Stroke::new(2.0_f32, p.accent_text);
 
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = p.panel;
     w.noninteractive.weak_bg_fill = p.panel;
-    w.noninteractive.bg_stroke = Stroke::new(1.0, p.divider);
-    w.noninteractive.fg_stroke = Stroke::new(1.0, p.text);
+    w.noninteractive.bg_stroke = Stroke::new(1.0_f32, p.divider);
+    w.noninteractive.fg_stroke = Stroke::new(1.0_f32, p.text);
     w.noninteractive.corner_radius = CornerRadius::same(5);
     for (st, fill) in [(&mut w.inactive, p.button), (&mut w.hovered, p.hover), (&mut w.active, p.pressed), (&mut w.open, p.pressed)] {
         st.bg_fill = fill;
         st.weak_bg_fill = fill;
-        st.fg_stroke = Stroke::new(1.0, p.text);
+        st.fg_stroke = Stroke::new(1.0_f32, p.text);
         st.corner_radius = CornerRadius::same(5);
         st.expansion = 0.0;
         st.bg_stroke = Stroke::NONE;
     }
-    w.inactive.bg_stroke = Stroke::new(1.0, p.button_stroke);
-    w.open.bg_stroke = Stroke::new(1.0, p.button_stroke);
+    w.inactive.bg_stroke = Stroke::new(1.0_f32, p.button_stroke);
+    w.open.bg_stroke = Stroke::new(1.0_f32, p.button_stroke);
 }

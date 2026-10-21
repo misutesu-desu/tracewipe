@@ -174,7 +174,7 @@ impl Key {
 fn decode(ty: u32, data: &[u8]) -> Value {
     match ty {
         REG_SZ | REG_EXPAND_SZ => {
-            let u: Vec<u16> = data.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+            let u: Vec<u16> = data.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
             let end = u.iter().position(|&c| c == 0).unwrap_or(u.len());
             Value::Str(String::from_utf16_lossy(&u[..end]))
         }

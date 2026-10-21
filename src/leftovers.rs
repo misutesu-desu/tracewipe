@@ -1103,7 +1103,7 @@ fn scan_shortcuts(dir: &Path, m: &Matcher, start_menu: bool, depth: u8) -> Vec<L
 fn read_text_lower(p: &Path, limit: usize) -> String {
     let Ok(mut b) = fs::read(p) else { return String::new() };
     b.truncate(limit);
-    let u16s: Vec<u16> = b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let u16s: Vec<u16> = b.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
     let mut s = String::from_utf16_lossy(&u16s);
     s.push('\0');
     s.extend(b.iter().map(|&c| c as char));

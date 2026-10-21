@@ -78,8 +78,8 @@ unsafe fn to_rgba(icon: HICON) -> Option<Rgba> {
     cleanup(&info);
     let mut px = color?;
     // Old icons carry no alpha; their transparency lives in the mask.
-    let has_alpha = px.chunks_exact(4).any(|p| p[3] != 0);
-    for (i, p) in px.chunks_exact_mut(4).enumerate() {
+    let has_alpha = px.as_chunks::<4>().0.iter().any(|p| p[3] != 0);
+    for (i, p) in px.as_chunks_mut::<4>().0.iter_mut().enumerate() {
         p.swap(0, 2);
         if !has_alpha {
             let transparent = mask.as_ref().is_some_and(|m| m[i * 4] != 0);
@@ -104,6 +104,6 @@ mod tests {
         let windir = std::env::var("SystemRoot").unwrap();
         let icon = load(&Path::new(&windir).join("explorer.exe"), 0).expect("explorer icon");
         assert_eq!(icon.pixels.len(), icon.width * icon.height * 4);
-        assert!(icon.pixels.chunks_exact(4).any(|p| p[3] == 255));
+        assert!(icon.pixels.as_chunks::<4>().0.iter().any(|p| p[3] == 255));
     }
 }
