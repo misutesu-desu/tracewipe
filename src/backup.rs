@@ -102,7 +102,7 @@ pub fn list() -> Vec<Backup> {
             Backup { size: crate::leftovers::dir_size(&dir), dir, name, when: SystemTime::UNIX_EPOCH + Duration::from_secs(secs), items }
         })
         .collect();
-    out.sort_by(|a, b| b.when.cmp(&a.when));
+    out.sort_by_key(|b| std::cmp::Reverse(b.when));
     out
 }
 

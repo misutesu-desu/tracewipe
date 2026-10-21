@@ -606,7 +606,7 @@ pub fn scan(app: &App, others: &[App], depth: Depth) -> Vec<Leftover> {
             l.size = if *dir { dir_size(path) } else { fs::metadata(path).map(|m| m.len()).unwrap_or(0) };
         }
     });
-    out.sort_by(|a, b| (a.group(), a.confidence, a.label().to_lowercase()).cmp(&(b.group(), b.confidence, b.label().to_lowercase())));
+    out.sort_by_cached_key(|l| (l.group(), l.confidence, l.label().to_lowercase()));
     out
 }
 
