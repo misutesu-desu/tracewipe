@@ -2,7 +2,7 @@
 
 use crate::apps::split_command;
 use crate::leftovers::{Kind, Leftover};
-use crate::reg::{self, wide};
+use crate::reg::{self, wide, Hive, View};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -149,6 +149,8 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
     let mut report = Report { removed: 0, failed: Vec::new(), backup: backup.clone() };
 
     let mut paths: Vec<&Path> = Vec::new();
+    let mut rules: Vec<(&str, String)> = Vec::new();
+    let mut env_changed = false;
     for (i, l) in items.iter().enumerate() {
         let res = match &l.kind {
             Kind::Path { path, .. } => {
@@ -157,14 +159,42 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
             }
             Kind::Key { hive, view, path } => export_key(&reg::display_path(*hive, *view, path), view.reg_switch(), &backup, i)
                 .and_then(|_| reg::delete_tree(*hive, *view, path).map_err(win_err)),
-            Kind::Value { hive, view, path, name } => export_key(&reg::display_path(*hive, *view, path), view.reg_switch(), &backup, i)
-                .and_then(|_| reg::delete_value(*hive, *view, path, name).map_err(win_err)),
+            Kind::Value { hive, view, path, name } => {
+                backup_value(*hive, *view, path, name, &backup, i).and_then(|_| reg::delete_value(*hive, *view, path, name).map_err(win_err))
+            }
             Kind::Task { name } => delete_task(name, &backup, i),
+            Kind::Service { name } => delete_service(name, &backup, i),
+            Kind::Firewall { id, .. } => match backup_value(Hive::Hklm, View::V64, FIREWALL, id, &backup, i) {
+                Ok(()) => {
+                    rules.push((id, l.label()));
+                    continue;
+                }
+                Err(e) => Err(e),
+            },
+            Kind::PathEntry { hive, entry } => {
+                env_changed = true;
+                remove_path_entry(*hive, entry, &backup, i)
+            }
         };
         match res {
             Ok(()) => report.removed += 1,
             Err(e) => report.failed.push((l.label(), e)),
         }
+    }
+
+    if !rules.is_empty() {
+        let ids: Vec<&str> = rules.iter().map(|(id, _)| *id).collect();
+        let failed = delete_firewall_rules(&ids);
+        for (id, label) in rules {
+            if failed.contains(&id) {
+                report.failed.push((label, "Could not remove the firewall rule, run as administrator".into()));
+            } else {
+                report.removed += 1;
+            }
+        }
+    }
+    if env_changed {
+        broadcast_environment();
     }
 
     for p in &paths {
@@ -189,7 +219,7 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
 fn win_err(code: u32) -> String {
     match code {
         5 => "Access denied, run as administrator".into(),
-        c => format!("Hata {c}"),
+        c => format!("Error {c}"),
     }
 }
 
@@ -211,6 +241,58 @@ fn export_key(full: &str, switch: &str, dir: &Path, i: usize) -> Result<(), Stri
         Ok(())
     } else {
         Err("Backup failed, nothing was deleted".into())
+    }
+}
+
+const FIREWALL: &str = "SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy\\FirewallRules";
+
+fn backup_value(hive: Hive, view: View, path: &str, name: &str, dir: &Path, i: usize) -> Result<(), String> {
+    let Some(text) = reg::value_to_reg(hive, view, path, name) else {
+        return Err("Backup failed, nothing was deleted".into());
+    };
+    reg::write_reg_file(&dir.join(format!("{i:03}.reg")), &text).map_err(|e| e.to_string())
+}
+
+fn delete_service(name: &str, dir: &Path, i: usize) -> Result<(), String> {
+    let key = format!("HKLM\\SYSTEM\\CurrentControlSet\\Services\\{name}");
+    export_key(&key, "/reg:64", dir, i)?;
+    let _ = hidden("sc.exe").args(["stop", name]).output();
+    let d = hidden("sc.exe").args(["delete", name]).output().map_err(|e| e.to_string())?;
+    if d.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&d.stdout).lines().last().unwrap_or("Could not delete the service").trim().to_string())
+    }
+}
+
+/// Removes rules through the firewall service so it notices at once.
+/// Returns the ids that are still present afterwards.
+fn delete_firewall_rules<'a>(ids: &[&'a str]) -> Vec<&'a str> {
+    let list: Vec<String> = ids.iter().map(|id| format!("'{}'", id.replace('\'', "''"))).collect();
+    let script = format!("Remove-NetFirewallRule -Name {} -ErrorAction SilentlyContinue", list.join(","));
+    let _ = hidden("powershell.exe").args(["-NoProfile", "-NonInteractive", "-Command", &script]).output();
+    let Some(k) = reg::Key::open(Hive::Hklm, View::V64, FIREWALL) else { return Vec::new() };
+    ids.iter().copied().filter(|id| k.raw(id).is_some()).collect()
+}
+
+fn remove_path_entry(hive: Hive, entry: &str, dir: &Path, i: usize) -> Result<(), String> {
+    let (_, key) = crate::deep::ENV_KEYS.iter().find(|(h, _)| *h == hive).ok_or("No environment key")?;
+    let k = reg::Key::open(hive, View::V64, key).ok_or("Could not open the environment key")?;
+    let (ty, _) = k.raw("Path").ok_or("PATH is empty")?;
+    let Some(reg::Value::Str(path)) = k.get("Path") else { return Err("PATH is empty".into()) };
+    backup_value(hive, View::V64, key, "Path", dir, i)?;
+    let kept: Vec<&str> = path.split(';').filter(|e| !e.is_empty() && *e != entry).collect();
+    let expand = ty == windows_sys::Win32::System::Registry::REG_EXPAND_SZ;
+    reg::set_string(hive, View::V64, key, "Path", &kept.join(";"), expand).map_err(win_err)
+}
+
+/// Tells Explorer and other programs that environment variables changed.
+fn broadcast_environment() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageTimeoutW, HWND_BROADCAST, SMTO_ABORTIFHUNG, WM_SETTINGCHANGE};
+    let env = wide("Environment");
+    let mut result = 0usize;
+    unsafe {
+        SendMessageTimeoutW(HWND_BROADCAST, WM_SETTINGCHANGE, 0, env.as_ptr() as isize, SMTO_ABORTIFHUNG, 2000, &mut result);
     }
 }
 

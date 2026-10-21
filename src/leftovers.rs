@@ -18,6 +18,9 @@ pub enum Kind {
     Key { hive: Hive, view: View, path: String },
     Value { hive: Hive, view: View, path: String, name: String },
     Task { name: String },
+    Service { name: String },
+    Firewall { id: String, name: String },
+    PathEntry { hive: Hive, entry: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -36,15 +39,16 @@ pub struct Leftover {
 }
 
 impl Leftover {
-    fn new(kind: Kind, confidence: Confidence, reason: &'static str) -> Self {
+    pub(crate) fn new(kind: Kind, confidence: Confidence, reason: &'static str) -> Self {
         Leftover { kind, confidence, reason, size: 0, checked: confidence == Confidence::High }
     }
 
     pub fn group(&self) -> u8 {
         match self.kind {
             Kind::Path { .. } => 0,
-            Kind::Key { .. } | Kind::Value { .. } => 1,
+            Kind::Key { .. } | Kind::Value { .. } | Kind::PathEntry { .. } => 1,
             Kind::Task { .. } => 2,
+            Kind::Service { .. } | Kind::Firewall { .. } => 3,
         }
     }
 
@@ -54,6 +58,9 @@ impl Leftover {
             Kind::Key { hive, view, path } => reg::display_path(*hive, *view, path),
             Kind::Value { hive, view, path, name } => format!("{} : {}", reg::display_path(*hive, *view, path), name),
             Kind::Task { name } => name.clone(),
+            Kind::Service { name } => format!("Service {name}"),
+            Kind::Firewall { name, .. } => format!("Firewall rule {name}"),
+            Kind::PathEntry { hive, entry } => format!("{} PATH: {entry}", hive.short()),
         }
     }
 
@@ -360,17 +367,21 @@ pub fn is_protected(p: &Path) -> bool {
 
 // ---------------------------------------------------------------- matcher
 
-struct Matcher {
+pub(crate) struct Matcher {
     names: Vec<String>,
     /// Versions from the name and version fields, with their major.minor forms.
     versions: Vec<String>,
     publishers: Vec<String>,
-    location: Option<String>,
+    pub(crate) location: Option<String>,
+    /// Executable names found in the install folder, without .exe.
+    pub(crate) exe_stems: HashSet<String>,
     other_names: HashSet<String>,
     other_publishers: HashSet<String>,
     other_locations: Vec<String>,
     /// Another program's folder sits inside the install folder.
     nested_others: bool,
+    /// Other programs' folders inside the install folder.
+    nested: Vec<String>,
 }
 
 impl Matcher {
@@ -398,22 +409,28 @@ impl Matcher {
         let location = own
             .filter(|s| s.len() > 6 && !is_protected(Path::new(s)))
             .filter(|s| !other_locations.iter().any(|o| o == s || s.starts_with(&format!("{o}\\"))));
-        let nested_others = location.as_ref().is_some_and(|s| other_locations.iter().any(|o| o.starts_with(&format!("{s}\\"))));
+        let nested: Vec<String> = match &location {
+            Some(s) => other_locations.iter().filter(|o| o.starts_with(&format!("{s}\\"))).cloned().collect(),
+            None => Vec::new(),
+        };
+        let nested_others = !nested.is_empty();
         Matcher {
             names,
             versions: app_versions(app),
+            exe_stems: location.as_deref().map(|l| exe_stems(l, &nested)).unwrap_or_default(),
             publishers: publisher_variants(app),
             location,
             other_names: others.iter().flat_map(name_variants).collect(),
             other_publishers: others.iter().flat_map(publisher_variants).collect(),
             nested_others,
+            nested: nested.clone(),
             other_locations,
         }
     }
 
     /// A name that carries a version, like "Python 3.11" or "Python311",
     /// only matches when the version is this program's version.
-    fn name_hit(&self, entry: &str) -> Option<Confidence> {
+    pub(crate) fn name_hit(&self, entry: &str) -> Option<Confidence> {
         let c = compact(entry);
         if self.names.contains(&c) {
             if let Some(v) = version_tokens(entry).first() {
@@ -456,22 +473,26 @@ impl Matcher {
 
     /// Does the text contain a path into the install folder? The next character is
     /// checked so that a folder named Foo does not match Foobar.
-    fn mentions_location(&self, text_lower: &str) -> bool {
+    pub(crate) fn mentions_location(&self, text_lower: &str) -> bool {
         let Some(loc) = &self.location else { return false };
         let mut from = 0;
+        let boundary = |rest: &str| matches!(rest.chars().next(), None | Some('\\' | '"' | '\'' | '\0' | ',' | ';'));
         while let Some(i) = text_lower[from..].find(loc.as_str()) {
-            let end = from + i + loc.len();
-            match text_lower[end..].chars().next() {
-                None | Some('\\' | '"' | '\'' | '\0' | ',' | ';') => return true,
-                _ => from = end,
+            let start = from + i;
+            let end = start + loc.len();
+            let tail = &text_lower[start..];
+            let in_nested = self.nested.iter().any(|o| tail.starts_with(o.as_str()) && boundary(&tail[o.len()..]));
+            if boundary(&text_lower[end..]) && !in_nested {
+                return true;
             }
+            from = end;
         }
         false
     }
 
     /// A reference into the install folder may belong to another program living
     /// inside it, like Steam and its games.
-    fn mention_confidence(&self) -> Confidence {
+    pub(crate) fn mention_confidence(&self) -> Confidence {
         if self.nested_others {
             Confidence::Medium
         } else {
@@ -510,7 +531,11 @@ pub fn scan(app: &App, others: &[App]) -> Vec<Leftover> {
             }
             v
         },
-        || rayon::join(|| scan_registry(app, &m), || scan_tasks(pl.tasks.as_deref(), &m)),
+        || {
+            let (mut r, (t, d)) = rayon::join(|| scan_registry(app, &m), || rayon::join(|| scan_tasks(pl.tasks.as_deref(), &m), || crate::deep::scan(&m)));
+            r.extend(d);
+            (r, t)
+        },
     );
 
     files.retain_mut(|l| {
@@ -538,6 +563,29 @@ pub fn scan(app: &App, others: &[App]) -> Vec<Leftover> {
     out
 }
 
+/// Executable names in the install folder, a few levels deep.
+fn exe_stems(location: &str, skip: &[String]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let mut stack = vec![(PathBuf::from(location), 0u8)];
+    let mut seen = 0;
+    while let Some((dir, depth)) = stack.pop() {
+        for (name, path, is_dir) in read_dir_names(&dir) {
+            seen += 1;
+            if seen > 5000 {
+                return out;
+            }
+            if is_dir {
+                if depth < 3 && !skip.contains(&lower(&path)) {
+                    stack.push((path, depth + 1));
+                }
+            } else if let Some(stem) = name.to_lowercase().strip_suffix(".exe") {
+                out.insert(stem.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// Keeps each trace once and drops traces nested inside another one.
 fn dedupe(mut v: Vec<Leftover>) -> Vec<Leftover> {
     v.sort_by(|a, b| a.dedupe_key().cmp(&b.dedupe_key()).then(a.confidence.cmp(&b.confidence)));
@@ -547,7 +595,7 @@ fn dedupe(mut v: Vec<Leftover>) -> Vec<Leftover> {
         let k = l.dedupe_key();
         let inside = kept.iter().any(|p| k == *p || k.starts_with(&format!("{p}\\")));
         if !inside {
-            let is_container = !matches!(l.kind, Kind::Value { .. } | Kind::Task { .. });
+            let is_container = matches!(l.kind, Kind::Path { .. } | Kind::Key { .. });
             if is_container {
                 kept.push(k);
             }

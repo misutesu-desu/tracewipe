@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod apps;
+mod deep;
 mod leftovers;
 mod reg;
 mod remove;

@@ -22,6 +22,7 @@ const IC_FILE: &str = "\u{E8A5}";
 const IC_REG: &str = "\u{E74C}";
 const IC_TASK: &str = "\u{E823}";
 const IC_SHIELD: &str = "\u{EA18}";
+const IC_SERVICE: &str = "\u{E912}";
 const IC_SORT_UP: &str = "\u{E70E}";
 const IC_SORT_DOWN: &str = "\u{E70D}";
 
@@ -649,7 +650,7 @@ impl UiApp {
         egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             let width = ui.available_width();
-            for (g, title) in [(0u8, "Files and folders"), (1, "Registry"), (2, "Scheduled tasks")] {
+            for (g, title) in [(0u8, "Files and folders"), (1, "Registry"), (2, "Scheduled tasks"), (3, "Services and firewall rules")] {
                 let idx: Vec<usize> = (0..items.len()).filter(|&i| items[i].group() == g).collect();
                 if idx.is_empty() {
                     continue;
@@ -733,6 +734,9 @@ fn leftover_row(ui: &mut Ui, p: &Pal, width: f32, l: &mut Leftover) {
         Kind::Path { .. } => (IC_FILE, p.weak),
         Kind::Key { .. } | Kind::Value { .. } => (IC_REG, p.weak),
         Kind::Task { .. } => (IC_TASK, p.weak),
+        Kind::Service { .. } => (IC_SERVICE, p.weak),
+        Kind::Firewall { .. } => (IC_SHIELD, p.weak),
+        Kind::PathEntry { .. } => (IC_REG, p.weak),
     };
     ui.painter().text(egui::pos2(r.left() + 48.0, r.center().y), Align2::LEFT_CENTER, ic, FontId::new(16.0, FontFamily::Name(ICONS.into())), ic_color);
 
