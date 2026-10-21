@@ -21,7 +21,8 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("Tracewipe")
             .with_inner_size([1180.0, 720.0])
-            .with_min_inner_size([820.0, 480.0]),
+            .with_min_inner_size([820.0, 480.0])
+            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png")).unwrap_or_default()),
         ..Default::default()
     };
     eframe::run_native("Tracewipe", options, Box::new(|cc| Ok(Box::new(ui::UiApp::new(cc)))))
