@@ -220,3 +220,75 @@ pub fn delete_value(hive: Hive, view: View, path: &str, name: &str) -> Result<()
         Err(r)
     }
 }
+
+impl Key {
+    /// Type and bytes of a value, as stored.
+    pub fn raw(&self, name: &str) -> Option<(u32, Vec<u8>)> {
+        let n = wide(name);
+        let mut ty = 0u32;
+        let mut len = 0u32;
+        unsafe {
+            if RegQueryValueExW(self.0, n.as_ptr(), null_mut(), &mut ty, null_mut(), &mut len) != ERROR_SUCCESS {
+                return None;
+            }
+            let mut data = vec![0u8; len as usize];
+            if RegQueryValueExW(self.0, n.as_ptr(), null_mut(), &mut ty, data.as_mut_ptr(), &mut len) != ERROR_SUCCESS {
+                return None;
+            }
+            data.truncate(len as usize);
+            Some((ty, data))
+        }
+    }
+}
+
+fn hive_long(hive: Hive) -> &'static str {
+    match hive {
+        Hive::Hklm => "HKEY_LOCAL_MACHINE",
+        Hive::Hkcu => "HKEY_CURRENT_USER",
+    }
+}
+
+/// A .reg file that restores one value exactly, whatever its type.
+pub fn value_to_reg(hive: Hive, view: View, path: &str, name: &str) -> Option<String> {
+    let (ty, data) = Key::open(hive, view, path)?.raw(name)?;
+    let full = display_path(hive, view, path);
+    let key = format!("{}{}", hive_long(hive), &full[hive.short().len()..]);
+    let esc = name.replace('\\', "\\\\").replace('"', "\\\"");
+    let label = if name.is_empty() { "@".to_string() } else { format!("\"{esc}\"") };
+    let hex: Vec<String> = data.iter().map(|b| format!("{b:02x}")).collect();
+    Some(format!("Windows Registry Editor Version 5.00\r\n\r\n[{key}]\r\n{label}=hex({ty:x}):{}\r\n", hex.join(",")))
+}
+
+/// Writes a .reg file in the UTF-16 encoding regedit expects.
+pub fn write_reg_file(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    let mut bytes = vec![0xFF, 0xFE];
+    for u in text.encode_utf16() {
+        bytes.extend_from_slice(&u.to_le_bytes());
+    }
+    std::fs::write(path, bytes)
+}
+
+/// Writes a string value, keeping REG_EXPAND_SZ when `expand` is set.
+pub fn set_string(hive: Hive, view: View, path: &str, name: &str, value: &str, expand: bool) -> Result<(), u32> {
+    let k = Key::open_with(hive, view, path, KEY_SET_VALUE).ok_or(5u32)?;
+    let n = wide(name);
+    let v = wide(value);
+    let ty = if expand { REG_EXPAND_SZ } else { REG_SZ };
+    let r = unsafe { RegSetValueExW(k.0, n.as_ptr(), 0, ty, v.as_ptr() as *const u8, (v.len() * 2) as u32) };
+    if r == ERROR_SUCCESS {
+        Ok(())
+    } else {
+        Err(r)
+    }
+}
+
+pub fn expand_env(s: &str) -> String {
+    use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
+    let src = wide(s);
+    let mut buf = vec![0u16; 32768];
+    let n = unsafe { ExpandEnvironmentStringsW(src.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) };
+    if n == 0 || n as usize > buf.len() {
+        return s.to_string();
+    }
+    String::from_utf16_lossy(&buf[..n as usize - 1])
+}
