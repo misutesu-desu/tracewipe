@@ -234,6 +234,31 @@ fn env(k: &str) -> Option<PathBuf> {
     std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from)
 }
 
+fn known_folder(id: &windows_sys::core::GUID) -> Option<PathBuf> {
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
+    let mut p = std::ptr::null_mut();
+    unsafe {
+        if SHGetKnownFolderPath(id, 0, std::ptr::null_mut(), &mut p) != 0 {
+            CoTaskMemFree(p as _);
+            return None;
+        }
+        let len = (0..).take_while(|&i| *p.add(i) != 0).count();
+        let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, len));
+        CoTaskMemFree(p as _);
+        Some(PathBuf::from(s))
+    }
+}
+
+/// A folder in the user profile that holds per-program folders.
+pub struct ProfileRoot {
+    path: PathBuf,
+    /// Only folders starting with a dot count, like .gradle in the home folder.
+    dotted: bool,
+    /// Best confidence a match here can get. Documents holds the user's own files.
+    cap: Confidence,
+}
+
 fn lower(p: &Path) -> String {
     p.to_string_lossy().trim_end_matches('\\').to_lowercase()
 }
@@ -243,6 +268,7 @@ struct Places {
     /// Root, and whether it is a Start menu. Desktop folders are never matched by name.
     shortcut_roots: Vec<(PathBuf, bool)>,
     tasks: Option<PathBuf>,
+    profile_roots: Vec<ProfileRoot>,
     protected: Vec<String>,
     windir: String,
 }
@@ -291,7 +317,25 @@ fn places() -> &'static Places {
         }
         protected.push(lower(&windir));
 
+        use windows_sys::Win32::UI::Shell::{FOLDERID_Documents, FOLDERID_SavedGames};
+        let docs = known_folder(&FOLDERID_Documents);
+        let mut profile_roots = Vec::new();
+        if let Some(h) = &home {
+            profile_roots.push(ProfileRoot { path: h.clone(), dotted: true, cap: Confidence::High });
+        }
+        if let Some(d) = &docs {
+            profile_roots.push(ProfileRoot { path: d.join("My Games"), dotted: false, cap: Confidence::High });
+            profile_roots.push(ProfileRoot { path: d.clone(), dotted: false, cap: Confidence::Medium });
+        }
+        if let Some(g) = known_folder(&FOLDERID_SavedGames) {
+            profile_roots.push(ProfileRoot { path: g, dotted: false, cap: Confidence::High });
+        }
+        for r in &profile_roots {
+            protected.push(lower(&r.path));
+        }
+
         Places {
+            profile_roots,
             tasks: Some(windir.join("System32\\Tasks")).filter(|p| p.is_dir()),
             file_roots,
             shortcut_roots,
@@ -457,6 +501,7 @@ pub fn scan(app: &App, others: &[App]) -> Vec<Leftover> {
     let (mut files, (mut keys, tasks)) = rayon::join(
         || {
             let mut v: Vec<Leftover> = pl.file_roots.par_iter().flat_map_iter(|r| scan_file_root(r, &m)).collect();
+            v.extend(pl.profile_roots.iter().flat_map(|r| scan_profile_root(r, &m)));
             v.extend(pl.shortcut_roots.par_iter().flat_map_iter(|(r, menu)| scan_shortcuts(r, &m, *menu, 0)).collect::<Vec<_>>());
             if let Some(loc) = &app.location {
                 if m.location.is_some() && loc.exists() {
@@ -562,6 +607,30 @@ fn scan_file_root(root: &Path, m: &Matcher) -> Vec<Leftover> {
             if !found && !m.pub_shared(&name) && m.names.iter().any(|n| n.starts_with(&compact(&name))) {
                 out.push(Leftover::new(Kind::Path { path, dir: true }, Confidence::Medium, "Publisher folder, no other program uses it"));
             }
+        }
+    }
+    out
+}
+
+fn scan_profile_root(r: &ProfileRoot, m: &Matcher) -> Vec<Leftover> {
+    let mut out = Vec::new();
+    for (name, path, is_dir) in read_dir_names(&r.path) {
+        if !is_dir {
+            continue;
+        }
+        let bare = match name.strip_prefix('.') {
+            Some(b) if r.dotted => b,
+            None if !r.dotted => name.as_str(),
+            _ => continue,
+        };
+        if let Some(c) = m.name_hit(bare) {
+            let c = c.max(r.cap);
+            let reason = if c == Confidence::Medium && r.cap == Confidence::Medium {
+                "In Documents, may hold your own files"
+            } else {
+                reason_for(c, "Profile folder with the program's name")
+            };
+            out.push(Leftover::new(Kind::Path { path, dir: true }, c, reason));
         }
     }
     out
