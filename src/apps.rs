@@ -132,6 +132,15 @@ impl App {
     }
 }
 
+/// A version without trailing zero parts, so 0.85.0 and 0.85.0.0 compare equal.
+fn same_version(v: &str) -> &str {
+    let mut v = v.trim();
+    while let Some(rest) = v.strip_suffix(".0") {
+        v = rest;
+    }
+    v
+}
+
 /// The program whose folder holds `exe`. The deepest folder wins, so a game
 /// inside Steam's folder resolves to the game.
 pub fn owner_of(apps: &[App], exe: &Path) -> Option<usize> {
@@ -169,7 +178,8 @@ pub fn merge(mut a: Vec<App>, b: Vec<App>) -> Vec<App> {
             return true;
         }
         let c = crate::leftovers::compact(&x.name);
-        !registry.iter().any(|(n, v)| *n == c || (n.starts_with(&c) && !x.version.is_empty() && *v == x.version))
+        let ver = same_version(&x.version);
+        !registry.iter().any(|(n, v)| *n == c || (n.starts_with(&c) && !ver.is_empty() && same_version(v) == ver))
     });
     a.sort_by_cached_key(|x| x.name.to_lowercase());
     a
@@ -367,6 +377,13 @@ mod tests {
         assert!(a.broken(), "the uninstaller path does not exist");
         a.uninstall = Some(format!("\"{}\" /x", std::env::current_exe().unwrap().display()));
         assert!(!a.broken());
+    }
+
+    #[test]
+    fn trailing_zero_versions_match() {
+        assert_eq!(same_version("0.85.0.0"), same_version("0.85.0"));
+        assert_ne!(same_version("0.85.1"), same_version("0.85"));
+        assert_eq!(same_version("10.0"), "10");
     }
 
     #[test]
