@@ -407,9 +407,9 @@ pub fn install_command(p: &Path) -> String {
 /// The recorded trace of a program's install, if there is one.
 pub fn find(app: &App) -> Option<Trace> {
     let rd = std::fs::read_dir(dir()).ok()?;
-    rd.flatten().map(|e| parse(&std::fs::read_to_string(e.path()).unwrap_or_default())).find(|t| {
-        t.entries.iter().any(|(h, v, k)| *h == app.hive && *v == app.view && k.eq_ignore_ascii_case(&app.key_name))
-    })
+    rd.flatten()
+        .map(|e| parse(&std::fs::read_to_string(e.path()).unwrap_or_default()))
+        .find(|t| t.entries.iter().any(|(h, v, k)| *h == app.hive && *v == app.view && k.eq_ignore_ascii_case(&app.key_name)))
 }
 
 /// Leftovers from the program's install trace that still exist. Items in the
@@ -427,7 +427,11 @@ pub fn leftovers(app: &App, names: &[String], location: Option<&str>) -> Vec<Lef
     }
     for (h, v, k) in t.keys.iter().filter(|(h, v, k)| reg::key_exists(*h, *v, k)) {
         let c = if named(k) { Confidence::High } else { Confidence::Medium };
-        out.push(Leftover::new(Kind::Key { hive: *h, view: *v, path: k.clone() }, c, "Registry key created while the program was installed"));
+        out.push(Leftover::new(
+            Kind::Key { hive: *h, view: *v, path: k.clone() },
+            c,
+            "Registry key created while the program was installed",
+        ));
     }
     out
 }

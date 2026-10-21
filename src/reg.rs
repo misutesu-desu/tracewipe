@@ -100,9 +100,7 @@ impl Key {
         let mut i = 0;
         loop {
             let mut len = buf.len() as u32;
-            let r = unsafe {
-                RegEnumKeyExW(self.0, i, buf.as_mut_ptr(), &mut len, null_mut(), null_mut(), null_mut(), null_mut())
-            };
+            let r = unsafe { RegEnumKeyExW(self.0, i, buf.as_mut_ptr(), &mut len, null_mut(), null_mut(), null_mut(), null_mut()) };
             if r != ERROR_SUCCESS {
                 break;
             }
@@ -122,9 +120,7 @@ impl Key {
             let mut nlen = name.len() as u32;
             let mut dlen = data.len() as u32;
             let mut ty = 0u32;
-            let r = unsafe {
-                RegEnumValueW(self.0, i, name.as_mut_ptr(), &mut nlen, null_mut(), &mut ty, data.as_mut_ptr(), &mut dlen)
-            };
+            let r = unsafe { RegEnumValueW(self.0, i, name.as_mut_ptr(), &mut nlen, null_mut(), &mut ty, data.as_mut_ptr(), &mut dlen) };
             if r == ERROR_MORE_DATA {
                 data.resize(dlen as usize + 2, 0);
                 continue;

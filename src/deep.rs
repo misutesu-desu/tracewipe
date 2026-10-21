@@ -72,7 +72,8 @@ fn firewall(m: &Matcher) -> Vec<Leftover> {
 }
 
 /// Class keys that are not file types or ProgIDs and are far too large to walk.
-const CLASS_SKIP: &[&str] = &["clsid", "interface", "typelib", "appid", "wow6432node", "local settings", "*", "directory", "folder", "drive"];
+const CLASS_SKIP: &[&str] =
+    &["clsid", "interface", "typelib", "appid", "wow6432node", "local settings", "*", "directory", "folder", "drive"];
 
 fn classes(m: &Matcher) -> Vec<Leftover> {
     if m.location.is_none() {
@@ -97,7 +98,13 @@ fn classes(m: &Matcher) -> Vec<Leftover> {
                                 .and_then(|sk| sk.get(""))
                                 .is_some_and(|v| m.mentions_location(&text(&v)))
                         });
-                        hit.then(|| Leftover::new(Kind::Key { hive, view, path }, m.mention_confidence(), "COM class served from the install folder"))
+                        hit.then(|| {
+                            Leftover::new(
+                                Kind::Key { hive, view, path },
+                                m.mention_confidence(),
+                                "COM class served from the install folder",
+                            )
+                        })
                     })
                     .collect();
                 out.extend(found);
@@ -112,8 +119,9 @@ fn classes(m: &Matcher) -> Vec<Leftover> {
                         .filter_map(|n| {
                             let path = format!("{base}\\{n}");
                             let cmd = Key::open(hive, view, &format!("{path}\\shell\\open\\command"))?.get("")?;
-                            m.mentions_location(&text(&cmd))
-                                .then(|| Leftover::new(Kind::Key { hive, view, path }, m.mention_confidence(), "File type opens with the program"))
+                            m.mentions_location(&text(&cmd)).then(|| {
+                                Leftover::new(Kind::Key { hive, view, path }, m.mention_confidence(), "File type opens with the program")
+                            })
                         })
                         .collect();
                     out.extend(found);
@@ -124,10 +132,8 @@ fn classes(m: &Matcher) -> Vec<Leftover> {
         .collect()
 }
 
-pub(crate) const ENV_KEYS: [(Hive, &str); 2] = [
-    (Hive::Hkcu, "Environment"),
-    (Hive::Hklm, "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"),
-];
+pub(crate) const ENV_KEYS: [(Hive, &str); 2] =
+    [(Hive::Hkcu, "Environment"), (Hive::Hklm, "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment")];
 
 fn path_entries(m: &Matcher) -> Vec<Leftover> {
     let mut out = Vec::new();
@@ -149,7 +155,21 @@ fn path_entries(m: &Matcher) -> Vec<Leftover> {
 }
 
 /// Executable names too common to identify a program on their own.
-const COMMON_EXE: &[&str] = &["setup", "install", "installer", "update", "updater", "helper", "launcher", "uninstall", "crashpad_handler", "crashreporter", "elevate", "service", "notification_helper"];
+const COMMON_EXE: &[&str] = &[
+    "setup",
+    "install",
+    "installer",
+    "update",
+    "updater",
+    "helper",
+    "launcher",
+    "uninstall",
+    "crashpad_handler",
+    "crashreporter",
+    "elevate",
+    "service",
+    "notification_helper",
+];
 
 fn exe_hit(m: &Matcher, exe: &str) -> bool {
     let stem = exe.trim_end_matches(".exe").to_lowercase();
@@ -207,7 +227,11 @@ fn crash_reports(m: &Matcher) -> Vec<Leftover> {
                 // foo.exe.1234.dmp
                 if let Some(i) = name.find(".exe.") {
                     if name.ends_with(".dmp") && exe_hit(m, &name[..i + 4]) {
-                        out.push(Leftover::new(Kind::Path { path: e.path(), dir: false }, m.mention_confidence(), "Crash dump of the program"));
+                        out.push(Leftover::new(
+                            Kind::Path { path: e.path(), dir: false },
+                            m.mention_confidence(),
+                            "Crash dump of the program",
+                        ));
                     }
                 }
             }
@@ -222,17 +246,29 @@ fn shell_caches(m: &Matcher) -> Vec<Leftover> {
         return Vec::new();
     }
     let keys = [
-        (Hive::Hkcu, "SOFTWARE\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\MuiCache", "Shell cache entry for the program"),
+        (
+            Hive::Hkcu,
+            "SOFTWARE\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\MuiCache",
+            "Shell cache entry for the program",
+        ),
         (Hive::Hkcu, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers", "Compatibility setting for the program"),
         (Hive::Hklm, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers", "Compatibility setting for the program"),
-        (Hive::Hkcu, "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Compatibility Assistant\\Store", "Compatibility record for the program"),
+        (
+            Hive::Hkcu,
+            "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Compatibility Assistant\\Store",
+            "Compatibility record for the program",
+        ),
     ];
     let mut out = Vec::new();
     for (hive, path, reason) in keys {
         let Some(k) = Key::open(hive, View::V64, path) else { continue };
         for (name, _) in k.values() {
             if m.mentions_location(&name.to_lowercase()) {
-                out.push(Leftover::new(Kind::Value { hive, view: View::V64, path: path.to_string(), name }, m.mention_confidence(), reason));
+                out.push(Leftover::new(
+                    Kind::Value { hive, view: View::V64, path: path.to_string(), name },
+                    m.mention_confidence(),
+                    reason,
+                ));
             }
         }
     }

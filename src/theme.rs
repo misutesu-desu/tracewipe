@@ -1,6 +1,6 @@
 use eframe::egui::{
-    self, style::ScrollAnimation, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Shadow,
-    Stroke, TextStyle, Theme, Vec2,
+    self, style::ScrollAnimation, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Shadow, Stroke, TextStyle,
+    Theme, Vec2,
 };
 use std::sync::Arc;
 

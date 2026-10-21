@@ -183,11 +183,7 @@ pub fn load_registry() -> Vec<App> {
 }
 
 fn load_uninstall_keys() -> Vec<App> {
-    let sources = [
-        (Hive::Hklm, View::V64),
-        (Hive::Hklm, View::V32),
-        (Hive::Hkcu, View::V64),
-    ];
+    let sources = [(Hive::Hklm, View::V64), (Hive::Hklm, View::V32), (Hive::Hkcu, View::V64)];
     let mut out: Vec<App> = Vec::new();
     let mut seen = HashSet::new();
     for (hive, view) in sources {
@@ -226,10 +222,7 @@ fn read(k: &Key, hive: Hive, view: View, key_name: String) -> Option<App> {
     let mut location = k.string("InstallLocation").map(|s| PathBuf::from(s.trim_matches('"').trim_end_matches('\\')));
     let mut location_guessed = false;
     if location.as_ref().is_none_or(|p| p.as_os_str().is_empty()) {
-        location = uninstall
-            .as_deref()
-            .and_then(|c| split_command(c).map(|(exe, _)| exe))
-            .and_then(|exe| guess_location(Path::new(&exe)));
+        location = uninstall.as_deref().and_then(|c| split_command(c).map(|(exe, _)| exe)).and_then(|exe| guess_location(Path::new(&exe)));
         location_guessed = location.is_some();
     }
 
@@ -339,14 +332,8 @@ mod tests {
             split_command(r#""C:\Program Files\A B\unins000.exe" /SILENT"#),
             Some((r"C:\Program Files\A B\unins000.exe".into(), "/SILENT".into()))
         );
-        assert_eq!(
-            split_command(r"C:\Program Files\X\uninst.exe /S"),
-            Some((r"C:\Program Files\X\uninst.exe".into(), "/S".into()))
-        );
-        assert_eq!(
-            split_command("MsiExec.exe /X{1234}"),
-            Some(("MsiExec.exe".into(), "/X{1234}".into()))
-        );
+        assert_eq!(split_command(r"C:\Program Files\X\uninst.exe /S"), Some((r"C:\Program Files\X\uninst.exe".into(), "/S".into())));
+        assert_eq!(split_command("MsiExec.exe /X{1234}"), Some(("MsiExec.exe".into(), "/X{1234}".into())));
     }
 
     #[test]

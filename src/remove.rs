@@ -1,8 +1,8 @@
 //! Runs uninstallers and removes traces in a reversible way.
 
 use crate::apps::split_command;
-use crate::leftovers::{Kind, Leftover};
 use crate::backup;
+use crate::leftovers::{Kind, Leftover};
 use crate::procs::{self, Proc};
 use crate::reg::{self, wide, Hive, View};
 use std::os::windows::process::CommandExt;
@@ -160,9 +160,8 @@ pub fn clean(app_name: &str, items: &[Leftover]) -> Report {
             }
             Kind::Key { hive, view, path } => export_key(&reg::display_path(*hive, *view, path), view.reg_switch(), &backup, i)
                 .and_then(|_| reg::delete_tree(*hive, *view, path).map_err(win_err)),
-            Kind::Value { hive, view, path, name } => {
-                backup_value(*hive, *view, path, name, &backup, i).and_then(|_| reg::delete_value(*hive, *view, path, name).map_err(win_err))
-            }
+            Kind::Value { hive, view, path, name } => backup_value(*hive, *view, path, name, &backup, i)
+                .and_then(|_| reg::delete_value(*hive, *view, path, name).map_err(win_err)),
             Kind::Task { name } => delete_task(name, &backup, i),
             Kind::Service { name } => delete_service(name, &backup, i),
             Kind::Firewall { id, .. } => match backup_value(Hive::Hklm, View::V64, FIREWALL, id, &backup, i) {
@@ -261,12 +260,7 @@ fn hidden(cmd: &str) -> Command {
 
 fn export_key(full: &str, switch: &str, dir: &Path, i: usize) -> Result<(), String> {
     let name = format!("{i:03}.reg");
-    let out = hidden("reg.exe")
-        .args(["export", full])
-        .arg(dir.join(&name))
-        .args(["/y", switch])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let out = hidden("reg.exe").args(["export", full]).arg(dir.join(&name)).args(["/y", switch]).output().map_err(|e| e.to_string())?;
     if out.status.success() {
         backup::note(dir, &["reg", &name]);
         Ok(())

@@ -145,7 +145,12 @@ pub fn restore(dir: &Path) -> Vec<String> {
                 }
             }
             ["task", file, name] => {
-                let ok = hidden("schtasks.exe").args(["/Create", "/TN", name, "/XML"]).arg(dir.join(file)).arg("/F").output().is_ok_and(|o| o.status.success());
+                let ok = hidden("schtasks.exe")
+                    .args(["/Create", "/TN", name, "/XML"])
+                    .arg(dir.join(file))
+                    .arg("/F")
+                    .output()
+                    .is_ok_and(|o| o.status.success());
                 if ok {
                     Ok(())
                 } else {

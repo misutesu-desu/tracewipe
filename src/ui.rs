@@ -1,13 +1,13 @@
 use crate::apps::{self, App};
-use crate::leftovers::{self, Confidence, Kind, Leftover};
 use crate::backup;
+use crate::leftovers::{self, Confidence, Kind, Leftover};
 use crate::procs;
 use crate::reg;
 use crate::remove::{self, Report};
 use crate::theme::{self, Pal, ICONS};
 use eframe::egui::{
-    self, text::LayoutJob, Align, Align2, Color32, CornerRadius, FontFamily, FontId, Frame, Key, Margin, Rect, RichText,
-    Sense, Stroke, StrokeKind, TextFormat, ThemePreference, Ui, Vec2,
+    self, text::LayoutJob, Align, Align2, Color32, CornerRadius, FontFamily, FontId, Frame, Key, Margin, Rect, RichText, Sense, Stroke,
+    StrokeKind, TextFormat, ThemePreference, Ui, Vec2,
 };
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,10 +31,25 @@ const IC_SORT_DOWN: &str = "\u{E70D}";
 
 enum Msg {
     /// The program list. `partial` is set while slower sources are still loading.
-    Apps { list: Vec<App>, partial: bool },
-    Size { generation: u64, index: usize, kb: u64 },
-    Installer { generation: u64, index: usize, kind: apps::Installer },
-    Icon { generation: u64, index: usize, image: egui::ColorImage },
+    Apps {
+        list: Vec<App>,
+        partial: bool,
+    },
+    Size {
+        generation: u64,
+        index: usize,
+        kb: u64,
+    },
+    Installer {
+        generation: u64,
+        index: usize,
+        kind: apps::Installer,
+    },
+    Icon {
+        generation: u64,
+        index: usize,
+        image: egui::ColorImage,
+    },
     /// The uninstaller of the job's program at this index has started.
     Progress(usize),
     /// Every uninstaller of the job has finished. Holds the errors.
@@ -224,7 +239,8 @@ impl UiApp {
 
     /// Reads program icons in the background. Programs sharing an icon file read it once.
     fn load_icons(&self, ctx: &egui::Context) {
-        let jobs: Vec<(usize, (PathBuf, i32))> = self.apps.iter().enumerate().filter_map(|(i, a)| a.icon.clone().map(|ic| (i, ic))).collect();
+        let jobs: Vec<(usize, (PathBuf, i32))> =
+            self.apps.iter().enumerate().filter_map(|(i, a)| a.icon.clone().map(|ic| (i, ic))).collect();
         let (tx, ctx, generation) = (self.tx.clone(), ctx.clone(), self.generation);
         std::thread::spawn(move || {
             let mut cache: std::collections::HashMap<(PathBuf, i32), Option<egui::ColorImage>> = std::collections::HashMap::new();
@@ -262,13 +278,8 @@ impl UiApp {
 
     /// Measures the folder size of programs whose entry has no size, in the background.
     fn measure_sizes(&self, ctx: &egui::Context) {
-        let jobs: Vec<(usize, PathBuf)> = self
-            .apps
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| a.size_kb == 0)
-            .filter_map(|(i, a)| a.location.clone().map(|l| (i, l)))
-            .collect();
+        let jobs: Vec<(usize, PathBuf)> =
+            self.apps.iter().enumerate().filter(|(_, a)| a.size_kb == 0).filter_map(|(i, a)| a.location.clone().map(|l| (i, l))).collect();
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         let generation = self.generation;
@@ -726,9 +737,13 @@ impl UiApp {
                 if self.admin {
                     ui.label(RichText::new("Administrator").size(12.0).color(p.weak));
                 } else {
-                    let b = egui::Button::new(RichText::new(format!("{IC_SHIELD}  Run as administrator")).size(12.0).family(FontFamily::Name(ICONS.into())))
-                        .frame(false);
-                    if ui.add(b).on_hover_text("Needed to remove traces under Program Files and HKLM").clicked() && remove::relaunch_as_admin() {
+                    let b = egui::Button::new(
+                        RichText::new(format!("{IC_SHIELD}  Run as administrator")).size(12.0).family(FontFamily::Name(ICONS.into())),
+                    )
+                    .frame(false);
+                    if ui.add(b).on_hover_text("Needed to remove traces under Program Files and HKLM").clicked()
+                        && remove::relaunch_as_admin()
+                    {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                 }
@@ -843,10 +858,21 @@ impl UiApp {
                         let ir = Rect::from_center_size(egui::pos2(x + 13.0, r.center().y), Vec2::splat(18.0));
                         match self.icons.get(&i) {
                             Some(tex) => {
-                                ui.painter().image(tex.id(), ir, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                                ui.painter().image(
+                                    tex.id(),
+                                    ir,
+                                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    Color32::WHITE,
+                                );
                             }
                             None => {
-                                ui.painter().text(ir.center(), Align2::CENTER_CENTER, IC_APP, FontId::new(15.0, FontFamily::Name(ICONS.into())), p.weak);
+                                ui.painter().text(
+                                    ir.center(),
+                                    Align2::CENTER_CENTER,
+                                    IC_APP,
+                                    FontId::new(15.0, FontFamily::Name(ICONS.into())),
+                                    p.weak,
+                                );
                             }
                         }
                     }
@@ -911,9 +937,8 @@ impl UiApp {
         if ui.ctx().wants_keyboard_input() && !ui.ctx().memory(|m| m.focused() == Some(ui.make_persistent_id("search"))) {
             return;
         }
-        let (down, up, home, end) = ui.input(|i| {
-            (i.key_pressed(Key::ArrowDown), i.key_pressed(Key::ArrowUp), i.key_pressed(Key::Home), i.key_pressed(Key::End))
-        });
+        let (down, up, home, end) =
+            ui.input(|i| (i.key_pressed(Key::ArrowDown), i.key_pressed(Key::ArrowUp), i.key_pressed(Key::Home), i.key_pressed(Key::End)));
         if !(down || up || home || end) {
             return;
         }
@@ -979,9 +1004,11 @@ impl UiApp {
         ui.add_space(10.0);
         ui.add(
             egui::Label::new(
-                RichText::new("The uninstallers run one after another. When the last one finishes, Tracewipe scans for what all of them left.")
-                    .size(12.0)
-                    .color(p.weak),
+                RichText::new(
+                    "The uninstallers run one after another. When the last one finishes, Tracewipe scans for what all of them left.",
+                )
+                .size(12.0)
+                .color(p.weak),
             )
             .wrap(),
         );
@@ -1015,7 +1042,8 @@ impl UiApp {
         }
         if let Some(loc) = &a.location {
             ui.label(RichText::new(if a.location_guessed { "Location, guessed" } else { "Location" }).size(12.0).color(p.weak));
-            let link = ui.add(egui::Link::new(RichText::new(loc.display().to_string()).color(p.accent_text))).on_hover_text("Open in Explorer");
+            let link =
+                ui.add(egui::Link::new(RichText::new(loc.display().to_string()).color(p.accent_text))).on_hover_text("Open in Explorer");
             if link.clicked() {
                 remove::reveal(loc);
             }
@@ -1037,8 +1065,7 @@ impl UiApp {
             checkbox(ui, p, &mut self.quiet, "Quiet uninstall");
         }
         ui.add_enabled_ui(self.admin, |ui| {
-            checkbox(ui, p, &mut self.restore_point, "Create a restore point first")
-                .on_disabled_hover_text("Needs administrator rights");
+            checkbox(ui, p, &mut self.restore_point, "Create a restore point first").on_disabled_hover_text("Needs administrator rights");
         });
         self.depth_picker(ui, p);
         ui.add_space(6.0);
@@ -1057,9 +1084,11 @@ impl UiApp {
         ui.add_space(10.0);
         ui.add(
             egui::Label::new(
-                RichText::new("When the uninstaller finishes, Tracewipe scans for what is left. You review the list before anything is removed.")
-                    .size(12.0)
-                    .color(p.weak),
+                RichText::new(
+                    "When the uninstaller finishes, Tracewipe scans for what is left. You review the list before anything is removed.",
+                )
+                .size(12.0)
+                .color(p.weak),
             )
             .wrap(),
         );
@@ -1175,8 +1204,20 @@ impl UiApp {
                         let (r, resp) = ui.allocate_exact_size(Vec2::new(width, ROW + 16.0), Sense::hover());
                         paint_row(ui, p, r, false, resp.hovered());
                         let age = b.when.elapsed().map(|d| d.as_secs()).unwrap_or(0);
-                        let when = if age < 3600 { format!("{} min ago", age / 60) } else if age < 86400 { format!("{} h ago", age / 3600) } else { format!("{} days ago", age / 86400) };
-                        ui.painter().text(egui::pos2(r.left() + 16.0, r.top() + 12.0), Align2::LEFT_CENTER, &b.name, FontId::proportional(14.0), p.text);
+                        let when = if age < 3600 {
+                            format!("{} min ago", age / 60)
+                        } else if age < 86400 {
+                            format!("{} h ago", age / 3600)
+                        } else {
+                            format!("{} days ago", age / 86400)
+                        };
+                        ui.painter().text(
+                            egui::pos2(r.left() + 16.0, r.top() + 12.0),
+                            Align2::LEFT_CENTER,
+                            &b.name,
+                            FontId::proportional(14.0),
+                            p.text,
+                        );
                         ui.painter().text(
                             egui::pos2(r.left() + 16.0, r.top() + 31.0),
                             Align2::LEFT_CENTER,
@@ -1189,7 +1230,11 @@ impl UiApp {
                             restore = Some(i);
                         }
                         let dr = Rect::from_min_size(egui::pos2(r.right() - 132.0, r.center().y - 14.0), Vec2::new(116.0, 28.0));
-                        if ui.put(dr, egui::Button::new("Delete for good")).on_hover_text("Frees the space now. This cannot be undone.").clicked() {
+                        if ui
+                            .put(dr, egui::Button::new("Delete for good"))
+                            .on_hover_text("Frees the space now. This cannot be undone.")
+                            .clicked()
+                        {
                             discard = Some(i);
                         }
                     }
@@ -1226,7 +1271,9 @@ impl UiApp {
             ui.set_width(420.0);
             ui.label(RichText::new("The program is running").size(20.0).color(p.text));
             ui.add_space(6.0);
-            ui.label(RichText::new("These processes run from its folder. Uninstalling while they run can leave files behind.").color(p.weak));
+            ui.label(
+                RichText::new("These processes run from its folder. Uninstalling while they run can leave files behind.").color(p.weak),
+            );
             ui.add_space(6.0);
             for r in &running {
                 ui.label(RichText::new(format!("{}  {}", r.name, r.pid)).color(p.label));
@@ -1334,9 +1381,16 @@ impl UiApp {
                 }
                 let all = idx.iter().all(|&i| items[i].checked);
                 let (r, _) = ui.allocate_exact_size(Vec2::new(width, GROUP), Sense::hover());
-                ui.painter().text(egui::pos2(r.left() + 16.0, r.center().y), Align2::LEFT_CENTER, format!("{title}  {}", idx.len()), FontId::proportional(14.0), p.label);
+                ui.painter().text(
+                    egui::pos2(r.left() + 16.0, r.center().y),
+                    Align2::LEFT_CENTER,
+                    format!("{title}  {}", idx.len()),
+                    FontId::proportional(14.0),
+                    p.label,
+                );
                 let br = Rect::from_min_size(egui::pos2(r.right() - 112.0, r.center().y - 12.0), Vec2::new(96.0, 24.0));
-                let b = ui.put(br, egui::Button::new(RichText::new(if all { "Select none" } else { "Select all" }).size(12.0)).frame(false));
+                let b =
+                    ui.put(br, egui::Button::new(RichText::new(if all { "Select none" } else { "Select all" }).size(12.0)).frame(false));
                 if b.clicked() {
                     idx.iter().for_each(|&i| items[i].checked = !all);
                 }
@@ -1365,7 +1419,14 @@ impl UiApp {
         Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
             ui.label(RichText::new("Cleanup finished").size(20.0).color(p.text));
             ui.add_space(6.0);
-            ui.label(RichText::new(format!("{} traces removed. You can restore them from Backups for {} days.", r.removed, crate::backup::KEEP_DAYS)).color(p.weak));
+            ui.label(
+                RichText::new(format!(
+                    "{} traces removed. You can restore them from Backups for {} days.",
+                    r.removed,
+                    crate::backup::KEEP_DAYS
+                ))
+                .color(p.weak),
+            );
             if backup.exists() {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Registry and task backup:").color(p.weak));
@@ -1457,7 +1518,13 @@ fn leftover_row(ui: &mut Ui, p: &Pal, width: f32, l: &mut Leftover) {
         Kind::Firewall { .. } => (IC_SHIELD, p.weak),
         Kind::PathEntry { .. } => (IC_REG, p.weak),
     };
-    ui.painter().text(egui::pos2(r.left() + 48.0, r.center().y), Align2::LEFT_CENTER, ic, FontId::new(16.0, FontFamily::Name(ICONS.into())), ic_color);
+    ui.painter().text(
+        egui::pos2(r.left() + 48.0, r.center().y),
+        Align2::LEFT_CENTER,
+        ic,
+        FontId::new(16.0, FontFamily::Name(ICONS.into())),
+        ic_color,
+    );
 
     let size = if l.size > 0 { human(l.size) } else { String::new() };
     let text_x = r.left() + 76.0;
@@ -1531,7 +1598,11 @@ fn paint_check(ui: &Ui, p: &Pal, r: Rect, on: bool) {
     let painter = ui.painter();
     if on {
         painter.rect_filled(r, 4.0, p.accent_text);
-        let pts = [egui::pos2(r.left() + 4.0, r.center().y), egui::pos2(r.left() + 7.5, r.bottom() - 5.0), egui::pos2(r.right() - 4.0, r.top() + 5.0)];
+        let pts = [
+            egui::pos2(r.left() + 4.0, r.center().y),
+            egui::pos2(r.left() + 7.5, r.bottom() - 5.0),
+            egui::pos2(r.right() - 4.0, r.top() + 5.0),
+        ];
         painter.line(pts.to_vec(), Stroke::new(1.6, p.on_accent));
     } else {
         painter.rect_stroke(r, 4.0, Stroke::new(1.0, p.control_stroke), StrokeKind::Inside);
@@ -1555,14 +1626,24 @@ fn checkbox(ui: &mut Ui, p: &Pal, v: &mut bool, text: &str) -> egui::Response {
 }
 
 fn accent_button(ui: &mut Ui, p: &Pal, text: &str) -> egui::Response {
-    ui.add(egui::Button::new(RichText::new(text).color(Color32::from_rgb(0xFF, 0xFF, 0xFF))).fill(p.accent).stroke(Stroke::NONE).min_size(Vec2::new(88.0, 28.0)))
+    ui.add(
+        egui::Button::new(RichText::new(text).color(Color32::from_rgb(0xFF, 0xFF, 0xFF)))
+            .fill(p.accent)
+            .stroke(Stroke::NONE)
+            .min_size(Vec2::new(88.0, 28.0)),
+    )
 }
 
 fn danger_button(ui: &mut Ui, p: &Pal, text: &str) -> egui::Response {
     let id = ui.next_auto_id();
     let pressed = ui.ctx().read_response(id).is_some_and(|r| r.is_pointer_button_down_on());
     let fill = if pressed { p.danger_pressed } else { p.danger };
-    ui.add(egui::Button::new(RichText::new(text).color(Color32::from_rgb(0xFF, 0xFF, 0xFF))).fill(fill).stroke(Stroke::NONE).min_size(Vec2::new(88.0, 28.0)))
+    ui.add(
+        egui::Button::new(RichText::new(text).color(Color32::from_rgb(0xFF, 0xFF, 0xFF)))
+            .fill(fill)
+            .stroke(Stroke::NONE)
+            .min_size(Vec2::new(88.0, 28.0)),
+    )
 }
 
 fn search_box(ui: &mut Ui, p: &Pal, text: &mut String, id: egui::Id, width: f32) -> egui::Response {

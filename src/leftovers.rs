@@ -74,26 +74,178 @@ impl Leftover {
 // ---------------------------------------------------------------- names
 
 const GENERIC: &[&str] = &[
-    "microsoft", "windows", "commonfiles", "temp", "tmp", "programs", "packages", "packagecache", "google",
-    "apple", "update", "updater", "app", "apps", "application", "applications", "data", "cache", "caches",
-    "software", "system", "system32", "user", "users", "default", "installer", "installers", "setup", "launcher",
-    "tools", "tool", "runtime", "runtimes", "driver", "drivers", "service", "services", "classes", "policies",
-    "wow6432node", "programfiles", "desktop", "documents", "downloads", "music", "pictures", "videos", "public",
-    "local", "locallow", "roaming", "appdata", "programdata", "logs", "log", "config", "settings", "plugins",
-    "bin", "lib", "share", "shared", "x64", "x86", "win64", "win32", "uninstall", "uninstaller", "startmenu",
-    "startup", "accessories", "administrativetools", "maintenance", "systemtools", "crashpad", "crashdumps",
-    "crashreports", "d3dscache", "history", "cookies", "identities", "credentials", "protect", "crypto",
-    "systemcertificates", "vault", "virtualstore", "clients", "registeredapplications", "intel", "nvidia",
-    "amd", "realtek", "oem", "node", "java", "client", "server", "helper", "core", "common", "player", "studio",
-    "browser", "editor", "viewer", "manager", "center", "centre", "suite", "pro", "free", "lite", "beta",
-    "portable", "web", "online", "assistant", "agent", "sdk", "toolkit", "library", "framework", "engine",
-    "host", "redistributable", "components", "extensions", "addons", "addin", "updates", "version", "versions",
-    "community", "professional", "enterprise", "edition", "standard", "basic", "home", "office", "games", "game",
+    "microsoft",
+    "windows",
+    "commonfiles",
+    "temp",
+    "tmp",
+    "programs",
+    "packages",
+    "packagecache",
+    "google",
+    "apple",
+    "update",
+    "updater",
+    "app",
+    "apps",
+    "application",
+    "applications",
+    "data",
+    "cache",
+    "caches",
+    "software",
+    "system",
+    "system32",
+    "user",
+    "users",
+    "default",
+    "installer",
+    "installers",
+    "setup",
+    "launcher",
+    "tools",
+    "tool",
+    "runtime",
+    "runtimes",
+    "driver",
+    "drivers",
+    "service",
+    "services",
+    "classes",
+    "policies",
+    "wow6432node",
+    "programfiles",
+    "desktop",
+    "documents",
+    "downloads",
+    "music",
+    "pictures",
+    "videos",
+    "public",
+    "local",
+    "locallow",
+    "roaming",
+    "appdata",
+    "programdata",
+    "logs",
+    "log",
+    "config",
+    "settings",
+    "plugins",
+    "bin",
+    "lib",
+    "share",
+    "shared",
+    "x64",
+    "x86",
+    "win64",
+    "win32",
+    "uninstall",
+    "uninstaller",
+    "startmenu",
+    "startup",
+    "accessories",
+    "administrativetools",
+    "maintenance",
+    "systemtools",
+    "crashpad",
+    "crashdumps",
+    "crashreports",
+    "d3dscache",
+    "history",
+    "cookies",
+    "identities",
+    "credentials",
+    "protect",
+    "crypto",
+    "systemcertificates",
+    "vault",
+    "virtualstore",
+    "clients",
+    "registeredapplications",
+    "intel",
+    "nvidia",
+    "amd",
+    "realtek",
+    "oem",
+    "node",
+    "java",
+    "client",
+    "server",
+    "helper",
+    "core",
+    "common",
+    "player",
+    "studio",
+    "browser",
+    "editor",
+    "viewer",
+    "manager",
+    "center",
+    "centre",
+    "suite",
+    "pro",
+    "free",
+    "lite",
+    "beta",
+    "portable",
+    "web",
+    "online",
+    "assistant",
+    "agent",
+    "sdk",
+    "toolkit",
+    "library",
+    "framework",
+    "engine",
+    "host",
+    "redistributable",
+    "components",
+    "extensions",
+    "addons",
+    "addin",
+    "updates",
+    "version",
+    "versions",
+    "community",
+    "professional",
+    "enterprise",
+    "edition",
+    "standard",
+    "basic",
+    "home",
+    "office",
+    "games",
+    "game",
 ];
 
 const COMPANY_SUFFIX: &[&str] = &[
-    "inc", "llc", "ltd", "limited", "corp", "corporation", "co", "gmbh", "ag", "sa", "srl", "bv", "pty", "plc",
-    "company", "the", "as", "ab", "oy", "kg", "sl", "spa", "sas", "ltda", "kft", "sro",
+    "inc",
+    "llc",
+    "ltd",
+    "limited",
+    "corp",
+    "corporation",
+    "co",
+    "gmbh",
+    "ag",
+    "sa",
+    "srl",
+    "bv",
+    "pty",
+    "plc",
+    "company",
+    "the",
+    "as",
+    "ab",
+    "oy",
+    "kg",
+    "sl",
+    "spa",
+    "sas",
+    "ltda",
+    "kft",
+    "sro",
 ];
 
 /// Splits into lowercase words, dropping versions, architecture tags and anything in brackets.
@@ -129,7 +281,8 @@ fn is_version(t: &str) -> bool {
     let t = t.strip_prefix('v').unwrap_or(t);
     let Some(first) = t.chars().next() else { return false };
     first.is_ascii_digit()
-        && (t.bytes().all(|b| b.is_ascii_digit()) || (t.contains('.') && t.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_".contains(&b))))
+        && (t.bytes().all(|b| b.is_ascii_digit())
+            || (t.contains('.') && t.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_".contains(&b))))
 }
 
 pub fn compact(s: &str) -> String {
@@ -155,10 +308,13 @@ fn app_versions(app: &App) -> Vec<String> {
     if !app.version.is_empty() && is_version(&app.version.to_lowercase()) {
         v.push(app.version.to_lowercase().trim_start_matches('v').to_string());
     }
-    let mm: Vec<String> = v.iter().filter_map(|s| {
-        let parts: Vec<&str> = s.split('.').collect();
-        (parts.len() > 2).then(|| format!("{}.{}", parts[0], parts[1]))
-    }).collect();
+    let mm: Vec<String> = v
+        .iter()
+        .filter_map(|s| {
+            let parts: Vec<&str> = s.split('.').collect();
+            (parts.len() > 2).then(|| format!("{}.{}", parts[0], parts[1]))
+        })
+        .collect();
     v.extend(mm);
     v.sort();
     v.dedup();
@@ -319,9 +475,8 @@ fn places() -> &'static Places {
                 protected.push(format!("{l}{sub}"));
             }
         }
-        for p in [&home, &public, &env("CommonProgramFiles"), &env("CommonProgramFiles(x86)"), &env("CommonProgramW6432")]
-            .into_iter()
-            .flatten()
+        for p in
+            [&home, &public, &env("CommonProgramFiles"), &env("CommonProgramFiles(x86)"), &env("CommonProgramW6432")].into_iter().flatten()
         {
             protected.push(lower(p));
         }
@@ -572,7 +727,8 @@ pub fn scan(app: &App, others: &[App], depth: Depth) -> Vec<Leftover> {
             v
         },
         || {
-            let (mut r, (t, d)) = rayon::join(|| scan_registry(app, &m), || rayon::join(|| scan_tasks(pl.tasks.as_deref(), &m), || crate::deep::scan(&m)));
+            let (mut r, (t, d)) =
+                rayon::join(|| scan_registry(app, &m), || rayon::join(|| scan_tasks(pl.tasks.as_deref(), &m), || crate::deep::scan(&m)));
             r.extend(d);
             (r, t)
         },
@@ -684,18 +840,77 @@ fn scan_prefixes(m: &Matcher) -> Vec<Leftover> {
 /// Folders that belong to Windows, runtimes or drivers and have no Uninstall
 /// entry of their own. Compared in compact form.
 const SYSTEM_FOLDERS: &[&str] = &[
-    "internetexplorer", "windowsapps", "modifiablewindowsapps", "microsoftnet", "referenceassemblies", "dotnet",
-    "msbuild", "windowsdefender", "windowsdefenderadvancedthreatprotection", "windowsmail", "windowsmediaplayer",
-    "windowsnt", "windowsphotoviewer", "windowsportabledevices", "windowssecurity", "windowspowershell",
-    "windowssidebar", "uninstallinformation", "nvidiacorporation", "nvidia", "regid", "ssh", "usoshared",
-    "usoprivate", "softwaredistribution", "comms", "connecteddevicesplatform", "d3dscache", "crashdumps",
-    "packagecache", "chocolatey", "scoop", "peernetworking", "publishers", "virtualstore", "devicesync",
-    "microsoftedge", "microsoftupdatehealthtools", "windowsdefenderapplicationguard", "iis", "iisexpress",
-    "intel", "amd", "ati", "realtek", "dell", "hp", "lenovo", "asus", "msi", "oem", "drivers", "driverstore",
-    "mozillamaintenanceservice", "googleupdater", "edgeupdate", "edgewebview", "fontcache", "igfx",
-    "windowskits", "wsl", "applicationverifier", "windowsappcertificationkit", "windowsperformanceanalyzer",
-    "toastnotificationmanagercompat", "placeholdertilelogofolder", "peerdistrepub", "elevateddiagnostics",
-    "visualstudiosetup", "downloadedinstallations", "shimgen",
+    "internetexplorer",
+    "windowsapps",
+    "modifiablewindowsapps",
+    "microsoftnet",
+    "referenceassemblies",
+    "dotnet",
+    "msbuild",
+    "windowsdefender",
+    "windowsdefenderadvancedthreatprotection",
+    "windowsmail",
+    "windowsmediaplayer",
+    "windowsnt",
+    "windowsphotoviewer",
+    "windowsportabledevices",
+    "windowssecurity",
+    "windowspowershell",
+    "windowssidebar",
+    "uninstallinformation",
+    "nvidiacorporation",
+    "nvidia",
+    "regid",
+    "ssh",
+    "usoshared",
+    "usoprivate",
+    "softwaredistribution",
+    "comms",
+    "connecteddevicesplatform",
+    "d3dscache",
+    "crashdumps",
+    "packagecache",
+    "chocolatey",
+    "scoop",
+    "peernetworking",
+    "publishers",
+    "virtualstore",
+    "devicesync",
+    "microsoftedge",
+    "microsoftupdatehealthtools",
+    "windowsdefenderapplicationguard",
+    "iis",
+    "iisexpress",
+    "intel",
+    "amd",
+    "ati",
+    "realtek",
+    "dell",
+    "hp",
+    "lenovo",
+    "asus",
+    "msi",
+    "oem",
+    "drivers",
+    "driverstore",
+    "mozillamaintenanceservice",
+    "googleupdater",
+    "edgeupdate",
+    "edgewebview",
+    "fontcache",
+    "igfx",
+    "windowskits",
+    "wsl",
+    "applicationverifier",
+    "windowsappcertificationkit",
+    "windowsperformanceanalyzer",
+    "toastnotificationmanagercompat",
+    "placeholdertilelogofolder",
+    "peerdistrepub",
+    "elevateddiagnostics",
+    "visualstudiosetup",
+    "downloadedinstallations",
+    "shimgen",
 ];
 
 /// How long a folder must sit untouched before it counts as unclaimed.
@@ -739,7 +954,8 @@ pub fn orphans(apps: &[App]) -> Vec<Leftover> {
                 if c.len() < 3 || GENERIC.contains(&c.as_str()) || SYSTEM_FOLDERS.iter().any(|s| c.starts_with(s)) {
                     continue;
                 }
-                if claimed.contains(&c) || claimed.iter().any(|n| n.len() >= 5 && (c.starts_with(n.as_str()) || n.starts_with(c.as_str()))) {
+                if claimed.contains(&c) || claimed.iter().any(|n| n.len() >= 5 && (c.starts_with(n.as_str()) || n.starts_with(c.as_str())))
+                {
                     continue;
                 }
                 let l = lower(&path);
@@ -750,7 +966,11 @@ pub fn orphans(apps: &[App]) -> Vec<Leftover> {
                 if last_touched(&path).is_none_or(|t| t > cutoff) {
                     continue;
                 }
-                v.push(Leftover::new(Kind::Path { path, dir: true }, Confidence::Medium, "No installed program claims this folder, untouched for a month"));
+                v.push(Leftover::new(
+                    Kind::Path { path, dir: true },
+                    Confidence::Medium,
+                    "No installed program claims this folder, untouched for a month",
+                ));
             }
             v
         })
@@ -806,7 +1026,11 @@ fn scan_file_root(root: &Path, m: &Matcher) -> Vec<Leftover> {
             for (cn, cp, cd) in read_dir_names(&path) {
                 if cd {
                     if let Some(c) = m.name_hit(&cn) {
-                        out.push(Leftover::new(Kind::Path { path: cp, dir: true }, c, reason_for(c, "Inside the publisher folder, same name as the program")));
+                        out.push(Leftover::new(
+                            Kind::Path { path: cp, dir: true },
+                            c,
+                            reason_for(c, "Inside the publisher folder, same name as the program"),
+                        ));
                         found = true;
                     }
                 }
@@ -907,11 +1131,7 @@ fn scan_registry(app: &App, m: &Matcher) -> Vec<Leftover> {
     let mut out = Vec::new();
 
     if app.source == crate::apps::Source::Registry && reg::key_exists(app.hive, app.view, &app.key_path()) {
-        out.push(Leftover::new(
-            Kind::Key { hive: app.hive, view: app.view, path: app.key_path() },
-            Confidence::High,
-            "Uninstall entry",
-        ));
+        out.push(Leftover::new(Kind::Key { hive: app.hive, view: app.view, path: app.key_path() }, Confidence::High, "Uninstall entry"));
     }
 
     for (hive, view) in SOFTWARE_VIEWS {
@@ -962,7 +1182,11 @@ fn scan_registry(app: &App, m: &Matcher) -> Vec<Leftover> {
                 let Some(sk) = Key::open(hive, view, &path) else { continue };
                 let target = sk.string("").unwrap_or_default().to_lowercase();
                 if m.mentions_location(&target) {
-                    out.push(Leftover::new(Kind::Key { hive, view, path }, m.mention_confidence(), "App Paths entry pointing into the install folder"));
+                    out.push(Leftover::new(
+                        Kind::Key { hive, view, path },
+                        m.mention_confidence(),
+                        "App Paths entry pointing into the install folder",
+                    ));
                 }
             }
         }
@@ -1030,7 +1254,8 @@ mod tests {
 
     #[test]
     fn variants() {
-        let a = app("Mozilla Firefox (x64 en-US)", "Mozilla", "Mozilla Firefox 131.0 (x64 en-US)", Some(r"C:\Program Files\Mozilla Firefox"));
+        let a =
+            app("Mozilla Firefox (x64 en-US)", "Mozilla", "Mozilla Firefox 131.0 (x64 en-US)", Some(r"C:\Program Files\Mozilla Firefox"));
         let v = name_variants(&a);
         assert!(v.contains(&"mozillafirefox".to_string()));
         assert!(v.contains(&"firefox".to_string()));
@@ -1047,7 +1272,8 @@ mod tests {
     fn generic_names_never_match() {
         let a = app("Update", "", "Update", None);
         assert!(name_variants(&a).is_empty());
-        let b = app("Roblox Player", "Roblox Corporation", "roblox-player", Some(r"C:\Program Files\Roblox\Versions\version-9ac8595712b447a7"));
+        let b =
+            app("Roblox Player", "Roblox Corporation", "roblox-player", Some(r"C:\Program Files\Roblox\Versions\version-9ac8595712b447a7"));
         assert_eq!(name_variants(&b), vec!["robloxplayer".to_string()]);
         let c = app("ShareX", "ShareX Team", "82E6AC09-0FEF-4390-AD9F-0DD3F5561EFC_is1", None);
         assert_eq!(name_variants(&c), vec!["sharex".to_string()]);

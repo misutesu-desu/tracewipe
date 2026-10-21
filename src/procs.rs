@@ -58,7 +58,8 @@ pub fn lockers(paths: &[PathBuf]) -> Vec<Proc> {
             let mut info: Vec<RM_PROCESS_INFO> = Vec::new();
             for _ in 0..3 {
                 count = info.len() as u32;
-                let r = RmGetList(session, &mut needed, &mut count, if info.is_empty() { null_mut() } else { info.as_mut_ptr() }, &mut reasons);
+                let r =
+                    RmGetList(session, &mut needed, &mut count, if info.is_empty() { null_mut() } else { info.as_mut_ptr() }, &mut reasons);
                 if r == ERROR_MORE_DATA {
                     info = vec![std::mem::zeroed(); needed as usize + 4];
                     continue;
@@ -208,7 +209,9 @@ mod tests {
         let me = std::env::current_exe().unwrap();
         assert_eq!(exe_path(std::process::id()).map(|p| p.to_string_lossy().to_lowercase()), Some(me.to_string_lossy().to_lowercase()));
         let windir = PathBuf::from(std::env::var("SystemRoot").unwrap());
-        assert!(running_in(&windir).iter().any(|p| p.name.eq_ignore_ascii_case("explorer.exe") || p.name.eq_ignore_ascii_case("svchost.exe")));
+        assert!(running_in(&windir)
+            .iter()
+            .any(|p| p.name.eq_ignore_ascii_case("explorer.exe") || p.name.eq_ignore_ascii_case("svchost.exe")));
     }
 }
 
