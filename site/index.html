@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracewipe</title>
+<meta name="description" content="An uninstaller for Windows that also removes what programs leave behind, with a backup of everything it deletes.">
+<link rel="icon" href="icon.png">
+<script>
+  // Apply a stored theme before the first paint.
+  try {
+    var t = localStorage.getItem("theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+  } catch (e) {}
+</script>
+<style>
+:root {
+  color-scheme: dark;
+  --strip: #0a0a0a; --content: #191919; --nav: #1f1f1f; --panel: #202020; --field: #2c2c2c;
+  --hover: #2d2d2d; --divider: #303030; --line: #3a3a3a; --popup-stroke: #3c3c3c;
+  --button: #2d2d2d; --button-stroke: #3a3a3a; --pressed: #424242;
+  --text: #f0f0f0; --label: #e1e1e1; --weak: #c8c8c8;
+  --accent: #0078d4; --accent-text: #60cdff; --on-accent: #000;
+  --focus: var(--text); --dur: 150ms;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --strip: #e8e8e8; --content: #fff; --nav: #f9f9f9; --panel: #f3f3f3; --field: #fff;
+    --hover: #f0f0f0; --divider: #e5e5e5; --line: #e5e5e5; --popup-stroke: #d7d7d7;
+    --button: #fbfbfb; --button-stroke: #dedede; --pressed: #dedede;
+    --text: #1a1a1a; --label: #232323; --weak: #606060;
+    --accent-text: #005fb8; --on-accent: #fff;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --strip: #e8e8e8; --content: #fff; --nav: #f9f9f9; --panel: #f3f3f3; --field: #fff;
+  --hover: #f0f0f0; --divider: #e5e5e5; --line: #e5e5e5; --popup-stroke: #d7d7d7;
+  --button: #fbfbfb; --button-stroke: #dedede; --pressed: #dedede;
+  --text: #1a1a1a; --label: #232323; --weak: #606060;
+  --accent-text: #005fb8; --on-accent: #fff;
+}
+@media (prefers-reduced-motion: reduce) { :root { --dur: 0ms; } }
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--content); color: var(--text);
+  font: 14px/1.55 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+}
+a { color: var(--accent-text); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+code, pre { font: 13px/1.5 Consolas, "Cascadia Mono", ui-monospace, monospace; }
+
+.bar {
+  position: sticky; top: 0; z-index: 1; background: var(--nav); border-bottom: 1px solid var(--divider);
+}
+.bar-inner {
+  max-width: 960px; margin: 0 auto; padding: 0 16px; height: 48px;
+  display: flex; align-items: center; gap: 12px;
+}
+.bar img { width: 24px; height: 24px; }
+.bar .name { font-size: 14px; color: var(--label); margin-right: auto; }
+.bar nav { display: flex; gap: 4px; }
+.bar nav a { color: var(--weak); text-decoration: none; padding: 4px 8px; border-radius: 5px; }
+.bar nav a:hover { background: var(--hover); color: var(--text); }
+
+button, .button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 14px;
+  background: var(--button); color: var(--text); border: 1px solid var(--button-stroke);
+  border-radius: 5px; font: inherit; text-decoration: none; cursor: pointer;
+}
+button:hover, .button:hover { background: var(--hover); }
+button:active, .button:active { background: var(--pressed); }
+.button.primary { background: var(--accent); color: #fff; border: 0; }
+.theme { min-height: 28px; padding: 2px 10px; }
+
+main { max-width: 960px; margin: 0 auto; padding: 0 16px 48px; }
+.hero { display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: center; padding: 56px 0 40px; }
+.hero h1 { font-size: 40px; line-height: 1.15; font-weight: 600; margin: 0 0 12px; }
+.hero p { font-size: 16px; color: var(--weak); margin: 0 0 24px; max-width: 34em; }
+.hero img { width: 160px; height: 160px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+section { padding: 32px 0; border-top: 1px solid var(--divider); }
+h2 { font-size: 20px; font-weight: 600; margin: 0 0 16px; }
+p { margin: 0 0 12px; max-width: 46em; }
+.weak { color: var(--weak); }
+
+.steps { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.steps li { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+.steps b { display: block; color: var(--accent-text); font-weight: 600; margin-bottom: 4px; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--divider); vertical-align: top; }
+th { color: var(--weak); font-weight: 400; font-size: 12px; }
+td:first-child { color: var(--label); white-space: nowrap; }
+
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+.card h3 { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+.card p { margin: 0; color: var(--weak); }
+
+pre { background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 0 0 12px; }
+footer { border-top: 1px solid var(--divider); color: var(--weak); font-size: 12px; }
+footer div { max-width: 960px; margin: 0 auto; padding: 16px; }
+
+@media (max-width: 760px) {
+  .hero { grid-template-columns: 1fr; padding-top: 32px; }
+  .hero img { width: 96px; height: 96px; order: -1; }
+  .hero h1 { font-size: 30px; }
+  .steps, .grid { grid-template-columns: 1fr; }
+  .bar nav { display: none; }
+  td:first-child { white-space: normal; }
+}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-inner">
+    <img src="icon.png" alt="">
+    <span class="name">Tracewipe</span>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#finds">What it finds</a>
+      <a href="#safety">Safety</a>
+      <a href="#cli">Command line</a>
+    </nav>
+    <button class="theme" id="theme" type="button" aria-label="Change theme">Theme: system</button>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div>
+      <h1>Uninstall programs, and what they leave behind.</h1>
+      <p>Tracewipe runs a program's own uninstaller, waits for it to really finish, then finds the folders, registry keys, services and tasks it left. You review the list. Everything removed goes into a backup you can restore for seven days.</p>
+      <div class="actions">
+        <a class="button primary" href="https://github.com/misutesu-desu/tracewipe/releases/latest">Download for Windows</a>
+        <a class="button" href="https://github.com/misutesu-desu/tracewipe">Source code</a>
+      </div>
+    </div>
+    <img src="icon.png" alt="Tracewipe icon">
+  </div>
+
+  <section id="how">
+    <h2>How a removal works</h2>
+    <ol class="steps">
+      <li><b>Close</b>If the program is running, Tracewipe offers to close it first.</li>
+      <li><b>Uninstall</b>The uninstaller runs in a job object. Tracewipe waits for it and every process it started.</li>
+      <li><b>Scan</b>Traces with strong evidence come checked. Weaker matches come unchecked, with the reason shown.</li>
+      <li><b>Remove</b>Files move into the backup folder. Registry keys and tasks are exported before they go.</li>
+    </ol>
+  </section>
+
+  <section id="finds">
+    <h2>What it finds</h2>
+    <p class="weak">Programs come from the Uninstall registry keys, Microsoft Store packages, Scoop and Chocolatey. Several can be removed in one go, quietly where the installer allows it.</p>
+    <table>
+      <thead><tr><th>Where</th><th>What counts as a trace</th></tr></thead>
+      <tbody>
+        <tr><td>Program Files, ProgramData, AppData</td><td>Folders named after the program or inside its publisher's folder</td></tr>
+        <tr><td>Profile</td><td>Dot folders such as <code>.rustup</code>, Saved Games, Documents\My Games</td></tr>
+        <tr><td>Start menu and desktop</td><td>Shortcuts named after the program or pointing into its folder</td></tr>
+        <tr><td>Registry</td><td>SOFTWARE keys, Run entries, App Paths, file types, COM classes</td></tr>
+        <tr><td>System</td><td>Services, firewall rules, scheduled tasks, PATH entries</td></tr>
+        <tr><td>Caches</td><td>Crash reports, network tracing keys, MUICache and compatibility entries</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="safety">
+    <h2>Safety</h2>
+    <div class="grid">
+      <div class="card"><h3>Conservative matching</h3><p>A folder or key must carry the program's exact name, or its content must point into the program's install folder.</p></div>
+      <div class="card"><h3>Shared folders stay unchecked</h3><p>A folder another installed program lives in is never checked by default, so Steam and its games are kept apart.</p></div>
+      <div class="card"><h3>Seven day backup</h3><p>Every removal can be restored from More, Backups. Locked files show which program holds them.</p></div>
+      <div class="card"><h3>Protected locations</h3><p>Windows, Program Files itself, the profile folders and the package managers' own folders are never offered.</p></div>
+    </div>
+  </section>
+
+  <section id="tracing">
+    <h2>Install tracing</h2>
+    <p>More, Install with tracing runs an installer and records what it creates. Files come from the NTFS change journal, so nothing hooks into the installer. Registry keys come from comparing key names before and after. When the program is removed later, the trace makes the scan complete. Tracing needs administrator rights.</p>
+  </section>
+
+  <section id="cli">
+    <h2>Command line</h2>
+    <pre><code>tracewipe --list
+tracewipe --scan &lt;name&gt; [--deep]
+tracewipe --orphans
+tracewipe --uninstall &lt;name&gt; [--quiet] [--force] [--yes]</code></pre>
+    <p class="weak"><code>--scan</code> and <code>--orphans</code> only list. <code>--uninstall</code> runs the uninstaller and scans, and with <code>--yes</code> removes the checked traces into a backup.</p>
+  </section>
+
+  <section id="build">
+    <h2>Build it yourself</h2>
+    <pre><code>git clone https://github.com/misutesu-desu/tracewipe
+cd tracewipe
+cargo build --release</code></pre>
+    <p class="weak">Needs stable Rust and the Windows SDK. Run the program as administrator to remove traces under Program Files and HKLM.</p>
+  </section>
+</main>
+
+<footer><div>Tracewipe is free software under GPL-3.0-or-later. <a href="https://github.com/misutesu-desu/tracewipe">GitHub</a></div></footer>
+
+<script>
+  var order = ["system", "dark", "light"];
+  var btn = document.getElementById("theme");
+  function current() { return document.documentElement.dataset.theme || "system"; }
+  function show() { btn.textContent = "Theme: " + current(); }
+  btn.addEventListener("click", function () {
+    var next = order[(order.indexOf(current()) + 1) % order.length];
+    if (next === "system") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("theme", next); } catch (e) {}
+    show();
+  });
+  show();
+</script>
+</body>
+</html>
