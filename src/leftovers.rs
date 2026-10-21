@@ -36,11 +36,13 @@ pub struct Leftover {
     pub reason: &'static str,
     pub size: u64,
     pub checked: bool,
+    /// Name of the program the trace belongs to, set when several are removed at once.
+    pub owner: String,
 }
 
 impl Leftover {
     pub(crate) fn new(kind: Kind, confidence: Confidence, reason: &'static str) -> Self {
-        Leftover { kind, confidence, reason, size: 0, checked: confidence == Confidence::High }
+        Leftover { kind, confidence, reason, size: 0, checked: confidence == Confidence::High, owner: String::new() }
     }
 
     pub fn group(&self) -> u8 {

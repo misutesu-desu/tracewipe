@@ -32,7 +32,10 @@ enum Msg {
     Apps(Vec<App>),
     Size { generation: u64, index: usize, kb: u64 },
     Installer { generation: u64, index: usize, kind: apps::Installer },
-    Uninstalled(Result<(), String>),
+    /// The uninstaller of the job's program at this index has started.
+    Progress(usize),
+    /// Every uninstaller of the job has finished. Holds the errors.
+    Uninstalled(Vec<String>),
     Scanned(Vec<Leftover>),
     Cleaned(Report),
     Warning(String),
@@ -44,7 +47,7 @@ enum Stage {
     List,
     Uninstalling,
     Scanning,
-    Review { items: Vec<Leftover>, still_installed: bool },
+    Review { items: Vec<Leftover>, still_installed: Vec<String> },
     Cleaning,
     Done(Report),
     Backups { list: Option<Vec<backup::Backup>>, message: Option<String> },
@@ -59,6 +62,24 @@ enum Col {
     Date,
 }
 
+/// Programs being removed together.
+struct Job {
+    apps: Vec<App>,
+    /// Every other installed program, to tell shared traces apart.
+    others: Vec<App>,
+    forced: bool,
+    current: usize,
+}
+
+impl Job {
+    fn title(&self) -> String {
+        match self.apps.as_slice() {
+            [one] => one.name.clone(),
+            many => format!("{} programs", many.len()),
+        }
+    }
+}
+
 pub struct UiApp {
     apps: Vec<App>,
     generation: u64,
@@ -69,12 +90,16 @@ pub struct UiApp {
     sort: Col,
     asc: bool,
     selected: Option<usize>,
+    /// Every selected program, for batch removal. Holds `selected` too.
+    multi: Vec<usize>,
+    /// Where a shift-click range starts.
+    anchor: Option<usize>,
     reveal_selected: bool,
     quiet: bool,
+    /// Quiet mode for batch removal, where answering many wizards is the point to avoid.
+    batch_quiet: bool,
     restore_point: bool,
-    target: Option<App>,
-    others: Vec<App>,
-    forced: bool,
+    job: Option<Job>,
     error: Option<String>,
     /// Result of an action on the finish screen.
     notice: Option<String>,
@@ -104,12 +129,13 @@ impl UiApp {
             sort: Col::Name,
             asc: true,
             selected: None,
+            multi: Vec::new(),
+            anchor: None,
             reveal_selected: false,
             quiet: false,
+            batch_quiet: true,
             restore_point: false,
-            target: None,
-            others: Vec::new(),
-            forced: false,
+            job: None,
             error: None,
             notice: None,
             confirm_close: None,
@@ -180,8 +206,11 @@ impl UiApp {
         while let Ok(m) = self.rx.try_recv() {
             match m {
                 Msg::Apps(list) => {
-                    let keep = self.selected.and_then(|i| self.apps.get(i)).map(|a| (a.key_name.clone(), a.hive, a.view));
+                    let id = |a: &App| (a.key_name.clone(), a.hive, a.view);
+                    let keep = self.selected.and_then(|i| self.apps.get(i)).map(id);
+                    let keep_multi: Vec<_> = self.multi.iter().filter_map(|&i| self.apps.get(i)).map(id).collect();
                     self.apps = list;
+                    self.multi = self.apps.iter().enumerate().filter(|(_, a)| keep_multi.contains(&id(a))).map(|(i, _)| i).collect();
                     self.generation += 1;
                     self.loading = false;
                     self.dirty = true;
@@ -206,17 +235,31 @@ impl UiApp {
                         }
                     }
                 }
-                Msg::Uninstalled(r) => {
-                    if let Err(e) = r {
-                        self.error = Some(e);
+                Msg::Progress(i) => {
+                    if let Some(j) = &mut self.job {
+                        j.current = i;
+                    }
+                }
+                Msg::Uninstalled(errors) => {
+                    if !errors.is_empty() {
+                        self.error = Some(errors.join("\n"));
                     }
                     self.start_scan(ctx);
                 }
                 Msg::Scanned(mut items) => {
-                    let app = self.target.as_ref().expect("target program");
-                    let still = !self.forced && reg::key_exists(app.hive, app.view, &app.key_path());
-                    if still {
-                        items.iter_mut().for_each(|l| l.checked = false);
+                    let Some(job) = &self.job else { continue };
+                    // A program whose entry is still there was not uninstalled,
+                    // so none of its traces start checked.
+                    let still: Vec<String> = if job.forced {
+                        Vec::new()
+                    } else {
+                        job.apps.iter().filter(|a| reg::key_exists(a.hive, a.view, &a.key_path())).map(|a| a.name.clone()).collect()
+                    };
+                    let single = job.apps.len() == 1;
+                    for l in items.iter_mut() {
+                        if (single && !still.is_empty()) || still.contains(&l.owner) {
+                            l.checked = false;
+                        }
                     }
                     self.stage = Stage::Review { items, still_installed: still };
                 }
@@ -235,10 +278,24 @@ impl UiApp {
         }
     }
 
-    /// Starts an uninstall, first asking to close the program's running processes.
+    /// The programs an action applies to: the whole selection, or the focused row.
+    fn targets(&self) -> Vec<App> {
+        if self.multi.len() > 1 {
+            self.multi.iter().filter_map(|&i| self.apps.get(i)).cloned().collect()
+        } else {
+            self.selected.and_then(|i| self.apps.get(i)).cloned().into_iter().collect()
+        }
+    }
+
+    /// Starts an uninstall, first asking to close the programs' running processes.
     fn start(&mut self, ctx: &egui::Context, forced: bool) {
-        let Some(app) = self.selected.and_then(|i| self.apps.get(i)) else { return };
-        let running = app.location.as_deref().filter(|_| !app.location_guessed).map(procs::running_in).unwrap_or_default();
+        let running: Vec<procs::Proc> = self
+            .targets()
+            .iter()
+            .filter(|a| !a.location_guessed)
+            .filter_map(|a| a.location.as_deref())
+            .flat_map(procs::running_in)
+            .collect();
         if running.is_empty() {
             self.start_with(ctx, forced, Vec::new());
         } else {
@@ -247,33 +304,25 @@ impl UiApp {
     }
 
     fn start_with(&mut self, ctx: &egui::Context, forced: bool, close: Vec<procs::Proc>) {
-        let Some(app) = self.selected.and_then(|i| self.apps.get(i)).cloned() else { return };
-        self.others = self
-            .apps
-            .iter()
-            .filter(|a| !(a.key_name == app.key_name && a.hive == app.hive && a.view == app.view))
-            .cloned()
-            .collect();
-        self.forced = forced;
+        let apps = self.targets();
+        if apps.is_empty() {
+            return;
+        }
+        let same = |a: &App, b: &App| a.key_name == b.key_name && a.hive == b.hive && a.view == b.view;
+        let others = self.apps.iter().filter(|o| !apps.iter().any(|a| same(a, o))).cloned().collect();
         self.error = None;
-        let cmd = app.command(self.quiet);
-        self.target = Some(app);
+        let quiet = self.quiet || apps.len() > 1 && self.batch_quiet;
+        let commands: Vec<(String, Option<String>)> = apps.iter().map(|a| (a.name.clone(), a.command(quiet && a.can_be_quiet()))).collect();
+        let job = Job { apps, others, forced, current: 0 };
+        let restore_point = self.restore_point.then(|| format!("Before uninstalling {}", job.title()));
+        self.job = Some(job);
         if forced {
-            if !close.is_empty() {
-                procs::close(&close, std::time::Duration::from_secs(3));
-            }
+            procs::close(&close, std::time::Duration::from_secs(3));
             self.start_scan(ctx);
             return;
         }
-        let Some(cmd) = cmd else {
-            self.error = Some("This program has no uninstall command. Use Force clean instead.".into());
-            self.start_scan(ctx);
-            return;
-        };
         self.stage = Stage::Uninstalling;
-        self.stop.store(false, Ordering::Relaxed);
         let (tx, stop, ctx) = (self.tx.clone(), self.stop.clone(), ctx.clone());
-        let restore_point = self.restore_point.then(|| format!("Before uninstalling {}", self.target.as_ref().map(|a| a.name.as_str()).unwrap_or("")));
         std::thread::spawn(move || {
             if !close.is_empty() {
                 procs::close(&close, std::time::Duration::from_secs(3));
@@ -286,22 +335,46 @@ impl UiApp {
                 }
                 None => None,
             };
-            let r = remove::run_uninstaller(&cmd, &stop);
+            let mut errors = Vec::new();
+            for (i, (name, cmd)) in commands.iter().enumerate() {
+                stop.store(false, Ordering::Relaxed);
+                let _ = tx.send(Msg::Progress(i));
+                ctx.request_repaint();
+                match cmd {
+                    None => errors.push(format!("{name} has no uninstall command, scanned for traces only.")),
+                    Some(c) => {
+                        if let Err(e) = remove::run_uninstaller(c, &stop) {
+                            errors.push(format!("{name}: {e}"));
+                        }
+                    }
+                }
+            }
             if let Some(s) = seq {
                 remove::end_restore_point(s);
             }
-            let _ = tx.send(Msg::Uninstalled(r));
+            let _ = tx.send(Msg::Uninstalled(errors));
             ctx.request_repaint();
         });
     }
 
     fn start_scan(&mut self, ctx: &egui::Context) {
         self.stage = Stage::Scanning;
-        let app = self.target.clone().expect("target program");
-        let others = std::mem::take(&mut self.others);
+        let Some(job) = &self.job else { return };
+        let (apps, others) = (job.apps.clone(), job.others.clone());
         let (tx, ctx) = (self.tx.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let items = leftovers::scan(&app, &others);
+            let mut items: Vec<Leftover> = Vec::new();
+            let mut seen = std::collections::HashSet::new();
+            for app in &apps {
+                for mut l in leftovers::scan(app, &others) {
+                    if seen.insert(l.label().to_lowercase()) {
+                        if apps.len() > 1 {
+                            l.owner = app.name.clone();
+                        }
+                        items.push(l);
+                    }
+                }
+            }
             let _ = tx.send(Msg::Scanned(items));
             ctx.request_repaint();
         });
@@ -309,7 +382,7 @@ impl UiApp {
 
     fn start_clean(&mut self, ctx: &egui::Context, items: Vec<Leftover>) {
         self.stage = Stage::Cleaning;
-        let name = self.target.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+        let name = self.job.as_ref().map(|j| j.title()).unwrap_or_default();
         let (tx, ctx) = (self.tx.clone(), ctx.clone());
         std::thread::spawn(move || {
             let r = remove::clean(&name, &items);
@@ -320,7 +393,7 @@ impl UiApp {
 
     fn back_to_list(&mut self, ctx: &egui::Context) {
         self.stage = Stage::List;
-        self.target = None;
+        self.job = None;
         self.error = None;
         self.reload(ctx);
     }
@@ -550,7 +623,7 @@ impl UiApp {
                 let i = self.filtered[pos];
                 let a = &self.apps[i];
                 let (r, resp) = ui.allocate_exact_size(Vec2::new(width, ROW), Sense::click());
-                let sel = self.selected == Some(i);
+                let sel = self.selected == Some(i) || self.multi.contains(&i);
                 paint_row(ui, p, r, sel, resp.hovered());
                 let mut x = r.left() + 12.0;
                 let size = if a.size_kb > 0 { human(a.size_kb * 1024) } else { String::new() };
@@ -570,15 +643,42 @@ impl UiApp {
                 if resp.clicked() {
                     clicked = Some(i);
                 }
-                if resp.double_clicked() {
-                    clicked = Some(i);
-                }
             }
         });
         ui.data_mut(|d| d.insert_temp(ui.id().with("scroll_y"), out.state.offset.y));
         if let Some(i) = clicked {
+            let m = ui.input(|i| i.modifiers);
+            self.click_row(i, m.command, m.shift);
+        }
+    }
+
+    /// Plain click selects one row, Ctrl toggles, Shift selects a range.
+    fn click_row(&mut self, i: usize, toggle: bool, range: bool) {
+        if range {
+            let pos = |x: usize| self.filtered.iter().position(|&f| f == x);
+            if let (Some(a), Some(b)) = (self.anchor.and_then(pos), pos(i)) {
+                let (lo, hi) = (a.min(b), a.max(b));
+                self.multi = self.filtered[lo..=hi].to_vec();
+                self.selected = Some(i);
+                return;
+            }
+        }
+        if toggle {
+            if let Some(k) = self.multi.iter().position(|&m| m == i) {
+                self.multi.remove(k);
+                self.selected = self.multi.last().copied();
+            } else {
+                if self.multi.is_empty() {
+                    self.multi.extend(self.selected);
+                }
+                self.multi.push(i);
+                self.selected = Some(i);
+            }
+        } else {
+            self.multi = vec![i];
             self.selected = Some(i);
         }
+        self.anchor = Some(i);
     }
 
     fn keyboard_nav(&mut self, ui: &Ui) {
@@ -601,10 +701,53 @@ impl UiApp {
             Some(c) => c.saturating_sub(1),
         };
         self.selected = Some(self.filtered[next]);
+        self.multi = vec![self.filtered[next]];
+        self.anchor = self.selected;
         self.reveal_selected = true;
     }
 
+    fn batch_details(&mut self, ui: &mut Ui, p: &Pal) {
+        let apps = self.targets();
+        let total: u64 = apps.iter().map(|a| a.size_kb).sum();
+        ui.label(RichText::new(format!("{} programs selected", apps.len())).size(20.0).color(p.text));
+        ui.add_space(4.0);
+        ui.label(RichText::new(human(total * 1024)).color(p.weak));
+        ui.add_space(10.0);
+        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+            for a in &apps {
+                let tag = if a.can_be_quiet() { "" } else { "  needs its own window" };
+                ui.label(RichText::new(format!("{}{tag}", a.name)).color(p.label));
+            }
+        });
+        ui.add_space(10.0);
+        checkbox(ui, p, &mut self.batch_quiet, "Quiet where possible");
+        ui.add_enabled_ui(self.admin, |ui| {
+            checkbox(ui, p, &mut self.restore_point, "Create a restore point first").on_disabled_hover_text("Needs administrator rights");
+        });
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if accent_button(ui, p, &format!("Uninstall {}", apps.len())).clicked() {
+                self.start(ui.ctx(), false);
+            }
+            if ui.add(egui::Button::new("Force clean").min_size(Vec2::new(0.0, 28.0))).clicked() {
+                self.start(ui.ctx(), true);
+            }
+        });
+        ui.add_space(10.0);
+        ui.add(
+            egui::Label::new(
+                RichText::new("The uninstallers run one after another. When the last one finishes, Tracewipe scans for what all of them left.")
+                    .size(12.0)
+                    .color(p.weak),
+            )
+            .wrap(),
+        );
+    }
+
     fn details(&mut self, ui: &mut Ui, p: &Pal) {
+        if self.multi.len() > 1 {
+            return self.batch_details(ui, p);
+        }
         let Some(a) = self.selected.and_then(|i| self.apps.get(i)).cloned() else {
             ui.add_space(8.0);
             ui.label(RichText::new("Select a program to uninstall.").color(p.weak));
@@ -802,11 +945,21 @@ impl UiApp {
     }
 
     fn waiting(&mut self, ui: &mut Ui, p: &Pal) {
-        let name = self.target.as_ref().map(|a| a.name.as_str()).unwrap_or("");
+        let (title, count) = match &self.job {
+            Some(j) => {
+                let name = j.apps.get(j.current).map(|a| a.name.as_str()).unwrap_or("");
+                let count = (j.apps.len() > 1).then(|| format!("{} of {}", j.current + 1, j.apps.len()));
+                (format!("Uninstalling {name}"), count)
+            }
+            None => (String::new(), None),
+        };
         centered(ui, |ui| {
             ui.add(egui::Spinner::new().size(24.0).color(p.accent_text));
             ui.add_space(12.0);
-            ui.label(RichText::new(format!("Uninstalling {name}")).size(20.0).color(p.text));
+            ui.label(RichText::new(title).size(20.0).color(p.text));
+            if let Some(c) = count {
+                ui.label(RichText::new(c).color(p.weak));
+            }
             ui.add_space(6.0);
             ui.label(RichText::new("Finish the steps in the uninstaller window. The scan starts when the uninstaller and every process it started have exited.").color(p.weak));
             ui.add_space(16.0);
@@ -817,14 +970,14 @@ impl UiApp {
     }
 
     fn review(&mut self, ui: &mut Ui, p: &Pal) {
-        let name = self.target.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+        let name = self.job.as_ref().map(|j| j.title()).unwrap_or_default();
         let ctx = ui.ctx().clone();
         let Stage::Review { items, still_installed } = &mut self.stage else { return };
 
         let mut go_back = false;
         let mut clean = false;
         Frame::new().inner_margin(Margin { left: 16, right: 16, top: 14, bottom: 8 }).show(ui, |ui| {
-            ui.label(RichText::new(format!("{name} izleri")).size(20.0).color(p.text));
+            ui.label(RichText::new(format!("Traces of {name}")).size(20.0).color(p.text));
             ui.add_space(4.0);
             let sel: Vec<&Leftover> = items.iter().filter(|l| l.checked).collect();
             let bytes: u64 = sel.iter().map(|l| l.size).sum();
@@ -837,14 +990,12 @@ impl UiApp {
             if let Some(e) = &self.error {
                 ui.label(RichText::new(e).color(p.error_text));
             }
-            if *still_installed {
-                ui.add(
-                    egui::Label::new(
-                        RichText::new("The program still looks installed. The uninstaller may have been cancelled or may be waiting for a restart. Nothing is checked.")
-                            .color(p.error_text),
-                    )
-                    .wrap(),
+            if !still_installed.is_empty() {
+                let text = format!(
+                    "Still installed: {}. The uninstaller may have been cancelled or may be waiting for a restart. Its traces are not checked.",
+                    still_installed.join(", ")
                 );
+                ui.add(egui::Label::new(RichText::new(text).color(p.error_text)).wrap());
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -1003,7 +1154,8 @@ fn leftover_row(ui: &mut Ui, p: &Pal, width: f32, l: &mut Leftover) {
     let g = elided(ui, &l.label(), FontId::proportional(14.0), p.text, tw);
     ui.painter().galley(egui::pos2(text_x, r.top() + 3.0), g, p.text);
     let reason_color = if l.confidence == Confidence::Medium { p.error_text } else { p.weak };
-    let g2 = elided(ui, l.reason, FontId::proportional(12.0), reason_color, tw);
+    let reason = if l.owner.is_empty() { l.reason.to_string() } else { format!("{}: {}", l.owner, l.reason) };
+    let g2 = elided(ui, &reason, FontId::proportional(12.0), reason_color, tw);
     ui.painter().galley(egui::pos2(text_x, r.top() + 21.0), g2, reason_color);
     ui.painter().text(egui::pos2(r.right() - 16.0, r.center().y), Align2::RIGHT_CENTER, size, FontId::proportional(12.0), p.weak);
 }
