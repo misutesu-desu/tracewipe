@@ -810,6 +810,7 @@ impl UiApp {
         match &a.source {
             apps::Source::Registry => field(ui, "Registry", &reg::display_path(a.hive, a.view, &a.key_path())),
             apps::Source::Store { full_name, .. } => field(ui, "Package", full_name),
+            apps::Source::Scoop { name, .. } | apps::Source::Chocolatey { name } => field(ui, "Package", name),
         }
         field(ui, "Scope", a.scope());
         field(ui, "Uninstaller", a.installer.label());

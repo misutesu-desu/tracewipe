@@ -342,6 +342,16 @@ fn places() -> &'static Places {
         for r in &profile_roots {
             protected.push(lower(&r.path));
         }
+        for (root, _) in crate::pkgmgr::scoop_roots() {
+            for sub in ["", "\\apps", "\\persist", "\\shims", "\\cache", "\\buckets"] {
+                protected.push(format!("{}{sub}", lower(&root)));
+            }
+        }
+        if let Some(root) = crate::pkgmgr::choco_root() {
+            for sub in ["", "\\lib", "\\bin"] {
+                protected.push(format!("{}{sub}", lower(&root)));
+            }
+        }
 
         Places {
             profile_roots,
@@ -529,6 +539,14 @@ pub fn scan(app: &App, others: &[App]) -> Vec<Leftover> {
             if let crate::apps::Source::Store { family, .. } = &app.source {
                 if let Some(d) = crate::store::data_folder(family).filter(|d| d.is_dir()) {
                     v.push(Leftover::new(Kind::Path { path: d, dir: true }, Confidence::High, "Package data folder"));
+                }
+            }
+            if let crate::apps::Source::Scoop { name, global } = &app.source {
+                for (root, g) in crate::pkgmgr::scoop_roots() {
+                    let persist = root.join("persist").join(name);
+                    if g == *global && persist.is_dir() {
+                        v.push(Leftover::new(Kind::Path { path: persist, dir: true }, Confidence::High, "Scoop persist folder"));
+                    }
                 }
             }
             if let Some(loc) = &app.location {

@@ -33,6 +33,8 @@ impl Installer {
 pub enum Source {
     Registry,
     Store { full_name: String, family: String },
+    Scoop { name: String, global: bool },
+    Chocolatey { name: String },
 }
 
 #[derive(Clone, Debug)]
@@ -63,8 +65,11 @@ impl App {
     }
 
     pub fn scope(&self) -> &'static str {
-        if matches!(self.source, Source::Store { .. }) {
-            return "Store";
+        match self.source {
+            Source::Store { .. } => return "Store",
+            Source::Scoop { .. } => return "Scoop",
+            Source::Chocolatey { .. } => return "Chocolatey",
+            Source::Registry => {}
         }
         match (self.hive, self.view) {
             (Hive::Hkcu, _) => "User",
@@ -102,6 +107,7 @@ impl App {
         match &self.source {
             Source::Registry => crate::reg::key_exists(self.hive, self.view, &self.key_path()),
             Source::Store { family, .. } => crate::store::is_installed(family),
+            Source::Scoop { .. } | Source::Chocolatey { .. } => self.location.as_ref().is_some_and(|l| l.exists()),
         }
     }
 
@@ -120,13 +126,33 @@ pub fn load() -> Vec<App> {
     merge(out, store)
 }
 
+/// Joins program lists. A Scoop or Chocolatey package whose program also has
+/// an Uninstall entry is listed once, through the entry.
 pub fn merge(mut a: Vec<App>, b: Vec<App>) -> Vec<App> {
     a.extend(b);
+    // Entry names often carry extra words, sometimes translated, such as
+    // "Inno Setup 6.7.1 sürümü" for the package "Inno Setup". The version decides.
+    let registry: Vec<(String, String)> =
+        a.iter().filter(|x| x.source == Source::Registry).map(|x| (crate::leftovers::compact(&x.name), x.version.clone())).collect();
+    a.retain(|x| {
+        if !matches!(x.source, Source::Chocolatey { .. }) {
+            return true;
+        }
+        let c = crate::leftovers::compact(&x.name);
+        !registry.iter().any(|(n, v)| *n == c || (n.starts_with(&c) && !x.version.is_empty() && *v == x.version))
+    });
     a.sort_by_cached_key(|x| x.name.to_lowercase());
     a
 }
 
+/// Uninstall entries plus Scoop and Chocolatey packages: everything that is fast to read.
 pub fn load_registry() -> Vec<App> {
+    let mut v = load_uninstall_keys();
+    v.extend(crate::pkgmgr::load());
+    v
+}
+
+fn load_uninstall_keys() -> Vec<App> {
     let sources = [
         (Hive::Hklm, View::V64),
         (Hive::Hklm, View::V32),

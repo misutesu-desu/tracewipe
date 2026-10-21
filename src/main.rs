@@ -4,6 +4,7 @@ mod apps;
 mod backup;
 mod deep;
 mod leftovers;
+mod pkgmgr;
 mod procs;
 mod reg;
 mod store;
