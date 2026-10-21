@@ -57,6 +57,7 @@ fn app(name: String, version: String, publisher: &str, location: PathBuf, uninst
         key_name: String::new(),
         installer: Installer::Unknown,
         source,
+        icon: None,
     }
 }
 

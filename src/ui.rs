@@ -25,6 +25,7 @@ const IC_REG: &str = "\u{E74C}";
 const IC_TASK: &str = "\u{E823}";
 const IC_SHIELD: &str = "\u{EA18}";
 const IC_SERVICE: &str = "\u{E912}";
+const IC_APP: &str = "\u{ECAA}";
 const IC_SORT_UP: &str = "\u{E70E}";
 const IC_SORT_DOWN: &str = "\u{E70D}";
 
@@ -33,6 +34,7 @@ enum Msg {
     Apps { list: Vec<App>, partial: bool },
     Size { generation: u64, index: usize, kb: u64 },
     Installer { generation: u64, index: usize, kind: apps::Installer },
+    Icon { generation: u64, index: usize, image: egui::ColorImage },
     /// The uninstaller of the job's program at this index has started.
     Progress(usize),
     /// Every uninstaller of the job has finished. Holds the errors.
@@ -120,6 +122,8 @@ pub struct UiApp {
     stop: Arc<AtomicBool>,
     admin: bool,
     theme: ThemePreference,
+    /// Loaded program icons, by index into `apps`.
+    icons: std::collections::HashMap<usize, egui::TextureHandle>,
 }
 
 impl UiApp {
@@ -154,6 +158,7 @@ impl UiApp {
             stop: Arc::new(AtomicBool::new(false)),
             admin: remove::is_admin(),
             theme,
+            icons: std::collections::HashMap::new(),
         };
         s.reload(&cc.egui_ctx);
         std::thread::spawn(backup::purge_old);
@@ -177,6 +182,27 @@ impl UiApp {
             let store = store_rx.recv().unwrap_or_default();
             let _ = tx.send(Msg::Apps { list: apps::merge(registry, store), partial: false });
             ctx.request_repaint();
+        });
+    }
+
+    /// Reads program icons in the background. Programs sharing an icon file read it once.
+    fn load_icons(&self, ctx: &egui::Context) {
+        let jobs: Vec<(usize, (PathBuf, i32))> = self.apps.iter().enumerate().filter_map(|(i, a)| a.icon.clone().map(|ic| (i, ic))).collect();
+        let (tx, ctx, generation) = (self.tx.clone(), ctx.clone(), self.generation);
+        std::thread::spawn(move || {
+            let mut cache: std::collections::HashMap<(PathBuf, i32), Option<egui::ColorImage>> = std::collections::HashMap::new();
+            for (index, key) in jobs {
+                let image = cache
+                    .entry(key.clone())
+                    .or_insert_with(|| {
+                        crate::icons::load(&key.0, key.1).map(|i| egui::ColorImage::from_rgba_unmultiplied([i.width, i.height], &i.pixels))
+                    })
+                    .clone();
+                if let Some(image) = image {
+                    let _ = tx.send(Msg::Icon { generation, index, image });
+                    ctx.request_repaint();
+                }
+            }
         });
     }
 
@@ -234,9 +260,17 @@ impl UiApp {
                     self.loading = partial;
                     self.dirty = true;
                     self.selected = keep.and_then(|k| self.apps.iter().position(|a| (a.key_name.clone(), a.hive, a.view) == k));
+                    self.icons.clear();
                     if !partial {
                         self.measure_sizes(ctx);
                         self.detect_installers(ctx);
+                        self.load_icons(ctx);
+                    }
+                }
+                Msg::Icon { generation, index, image } => {
+                    if generation == self.generation {
+                        let tex = ctx.load_texture(format!("icon-{index}"), image, egui::TextureOptions::LINEAR);
+                        self.icons.insert(index, tex);
                     }
                 }
                 Msg::Installer { generation, index, kind } => {
@@ -683,8 +717,20 @@ impl UiApp {
                         Col::Size => (&size, p.weak),
                         Col::Date => (&a.install_date, p.weak),
                     };
-                    let g = elided(ui, t, FontId::proportional(14.0), c, w - 12.0);
-                    let gx = if col == Col::Size { x + w - 8.0 - g.size().x } else { x + 4.0 };
+                    let indent = if col == Col::Name { 26.0 } else { 0.0 };
+                    if col == Col::Name {
+                        let ir = Rect::from_center_size(egui::pos2(x + 13.0, r.center().y), Vec2::splat(18.0));
+                        match self.icons.get(&i) {
+                            Some(tex) => {
+                                ui.painter().image(tex.id(), ir, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                            }
+                            None => {
+                                ui.painter().text(ir.center(), Align2::CENTER_CENTER, IC_APP, FontId::new(15.0, FontFamily::Name(ICONS.into())), p.weak);
+                            }
+                        }
+                    }
+                    let g = elided(ui, t, FontId::proportional(14.0), c, w - 12.0 - indent);
+                    let gx = if col == Col::Size { x + w - 8.0 - g.size().x } else { x + 4.0 + indent };
                     ui.painter().galley(egui::pos2(gx, r.center().y - g.size().y / 2.0), g, c);
                     x += w;
                 }

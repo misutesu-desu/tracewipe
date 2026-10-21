@@ -63,6 +63,7 @@ pub fn load() -> Vec<App> {
             view: View::V64,
             key_name: package,
             installer: Installer::Unknown,
+            icon: None,
             source: Source::Store {
                 full_name: id.FullName().map(|h| h.to_string()).unwrap_or_default(),
                 family: id.FamilyName().map(|h| h.to_string()).unwrap_or_default(),

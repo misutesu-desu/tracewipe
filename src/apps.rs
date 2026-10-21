@@ -57,6 +57,8 @@ pub struct App {
     pub key_name: String,
     pub installer: Installer,
     pub source: Source,
+    /// File and index of the program's icon.
+    pub icon: Option<(PathBuf, i32)>,
 }
 
 impl App {
@@ -204,7 +206,13 @@ fn read(k: &Key, hive: Hive, view: View, key_name: String) -> Option<App> {
     }
 
     let installer = guess_installer(msi, &key_name, uninstall.as_deref());
+    let icon = k
+        .string("DisplayIcon")
+        .and_then(|v| crate::icons::parse(&v))
+        .or_else(|| uninstall.as_deref().and_then(split_command).map(|(exe, _)| (PathBuf::from(exe), 0)))
+        .filter(|(p, _)| p.exists());
     Some(App {
+        icon,
         installer,
         source: Source::Registry,
         name,
@@ -331,6 +339,7 @@ mod tests {
             key_name: "Foo_is1".into(),
             installer: Installer::Unknown,
             source: Source::Registry,
+            icon: None,
         };
         a.installer = guess_installer(a.msi, &a.key_name, a.uninstall.as_deref());
         assert_eq!(a.installer, Installer::Inno);

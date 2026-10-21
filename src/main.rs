@@ -3,6 +3,7 @@
 mod apps;
 mod backup;
 mod deep;
+mod icons;
 mod leftovers;
 mod pkgmgr;
 mod procs;

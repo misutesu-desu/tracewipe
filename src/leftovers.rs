@@ -963,6 +963,7 @@ mod tests {
             key_name: key.into(),
             installer: crate::apps::Installer::Unknown,
             source: crate::apps::Source::Registry,
+            icon: None,
         }
     }
 
