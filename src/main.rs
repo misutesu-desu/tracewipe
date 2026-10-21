@@ -11,6 +11,7 @@ mod reg;
 mod store;
 mod remove;
 mod theme;
+mod trace;
 mod ui;
 
 use eframe::egui;

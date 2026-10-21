@@ -591,6 +591,7 @@ pub fn scan(app: &App, others: &[App], depth: Depth) -> Vec<Leftover> {
     });
     files.append(&mut keys);
     files.extend(tasks);
+    files.extend(crate::trace::leftovers(app, &m.names, m.location.as_deref()));
     if depth == Depth::Deep {
         files.extend(scan_prefixes(&m));
     }

@@ -42,6 +42,10 @@ enum Msg {
     Scanned(Vec<Leftover>),
     Cleaned(Report),
     Warning(String),
+    /// Install tracing moved on to its next step.
+    TracePhase(&'static str),
+    /// Install tracing finished, with a summary or an error.
+    Traced(Result<String, String>),
     Backups(Vec<backup::Backup>),
     Restored(Vec<String>),
 }
@@ -54,6 +58,7 @@ enum Stage {
     Cleaning,
     Done(Report),
     Backups { list: Option<Vec<backup::Backup>>, message: Option<String> },
+    Tracing(&'static str),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -141,6 +146,8 @@ pub struct UiApp {
     window_picker: Option<Vec<(String, PathBuf)>>,
     /// Short message under the search bar, such as a failed window pick.
     list_notice: Option<String>,
+    /// Uninstall entries with a recorded install trace.
+    traced: std::collections::HashSet<(reg::Hive, reg::View, String)>,
     stage: Stage,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -181,6 +188,7 @@ impl UiApp {
             confirm_close: None,
             window_picker: None,
             list_notice: None,
+            traced: std::collections::HashSet::new(),
             stage: Stage::List,
             tx,
             rx,
@@ -291,6 +299,7 @@ impl UiApp {
                     self.selected = keep.and_then(|k| self.apps.iter().position(|a| (a.key_name.clone(), a.hive, a.view) == k));
                     self.icons.clear();
                     if !partial {
+                        self.traced = crate::trace::index();
                         self.measure_sizes(ctx);
                         self.detect_installers(ctx);
                         self.load_icons(ctx);
@@ -349,6 +358,14 @@ impl UiApp {
                 }
                 Msg::Cleaned(r) => self.stage = Stage::Done(r),
                 Msg::Warning(w) => self.error = Some(w),
+                Msg::TracePhase(phase) => self.stage = Stage::Tracing(phase),
+                Msg::Traced(result) => {
+                    self.list_notice = Some(match result {
+                        Ok(summary) => summary,
+                        Err(e) => e,
+                    });
+                    self.back_to_list(ctx);
+                }
                 Msg::Backups(l) => {
                     if let Stage::Backups { list, .. } = &mut self.stage {
                         *list = Some(l);
@@ -447,6 +464,38 @@ impl UiApp {
             }
             let _ = tx.send(Msg::Uninstalled(errors));
             ctx.request_repaint();
+        });
+    }
+
+    fn start_trace(&mut self, ctx: &egui::Context) {
+        let Some(installer) = crate::trace::pick_installer() else { return };
+        self.stage = Stage::Tracing("Recording the current state");
+        self.stop.store(false, Ordering::Relaxed);
+        let (tx, stop, ctx) = (self.tx.clone(), self.stop.clone(), ctx.clone());
+        std::thread::spawn(move || {
+            let send = |m: Msg| {
+                let _ = tx.send(m);
+                ctx.request_repaint();
+            };
+            let snap = match crate::trace::begin() {
+                Ok(s) => s,
+                Err(e) => return send(Msg::Traced(Err(e))),
+            };
+            send(Msg::TracePhase("Finish the installer. Recording stops when it and every process it started have exited."));
+            if let Err(e) = remove::run_uninstaller(&crate::trace::install_command(&installer), &stop) {
+                return send(Msg::Traced(Err(e)));
+            }
+            send(Msg::TracePhase("Reading what the installer created"));
+            let t = crate::trace::finish(snap);
+            let result = if t.entries.is_empty() {
+                Err("The installer added no Uninstall entry, so the trace has nothing to attach to. Nothing was saved.".to_string())
+            } else {
+                crate::trace::save(&t).map_err(|e| e.to_string()).map(|_| {
+                    let names: Vec<&str> = t.entries.iter().map(|(_, _, k)| k.as_str()).collect();
+                    format!("Recorded {} files and folders and {} registry keys for {}.", t.files.len(), t.keys.len(), names.join(", "))
+                })
+            };
+            send(Msg::Traced(result));
         });
     }
 
@@ -575,6 +624,7 @@ impl eframe::App for UiApp {
             Stage::Cleaning => busy(ui, p, "Cleaning", "Moving files into the backup folder and exporting registry entries."),
             Stage::Done(_) => self.done(ui, p),
             Stage::Backups { .. } => self.backups(ui, p),
+            Stage::Tracing(phase) => busy(ui, p, "Tracing an install", phase),
         });
     }
 }
@@ -621,6 +671,15 @@ impl UiApp {
                         if ui.button("Pick from open windows").on_hover_text("Find the program behind a window").clicked() {
                             self.open_window_picker();
                             ui.close_menu();
+                        }
+                        ui.separator();
+                        let trace = ui.add_enabled(self.admin, egui::Button::new("Install with tracing"));
+                        let trace = trace
+                            .on_hover_text("Runs an installer and records what it creates, for a complete uninstall later")
+                            .on_disabled_hover_text("Needs administrator rights to read the NTFS change journal");
+                        if trace.clicked() {
+                            ui.close_menu();
+                            self.start_trace(ui.ctx());
                         }
                     });
                 });
@@ -969,6 +1028,9 @@ impl UiApp {
         }
         field(ui, "Scope", a.scope());
         field(ui, "Uninstaller", a.installer.label());
+        if self.traced.contains(&(a.hive, a.view, a.key_name.to_lowercase())) {
+            field(ui, "Install trace", "Recorded, used by the leftover scan");
+        }
 
         ui.add_space(10.0);
         if a.can_be_quiet() {
