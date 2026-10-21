@@ -20,7 +20,8 @@ jobs:
           New-Item -ItemType Directory dist | Out-Null
           Copy-Item target/release/nietono.exe dist/
           $hash = (Get-FileHash dist/nietono.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  nietono.exe" | Out-File -Encoding ascii dist/SHA256SUMS.txt
+          # LF line ending, so sha256sum -c can read it.
+          [IO.File]::WriteAllText("$PWD/dist/SHA256SUMS.txt", "$hash  nietono.exe`n")
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
