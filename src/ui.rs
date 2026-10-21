@@ -136,6 +136,10 @@ pub struct UiApp {
     notice: Option<String>,
     /// Processes from the install folder that are running, waiting for a decision.
     confirm_close: Option<(bool, Vec<procs::Proc>)>,
+    /// Open windows to pick a program from, with their executables.
+    window_picker: Option<Vec<(String, PathBuf)>>,
+    /// Short message under the search bar, such as a failed window pick.
+    list_notice: Option<String>,
     stage: Stage,
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
@@ -173,6 +177,8 @@ impl UiApp {
             error: None,
             notice: None,
             confirm_close: None,
+            window_picker: None,
+            list_notice: None,
             stage: Stage::List,
             tx,
             rx,
@@ -557,6 +563,7 @@ impl eframe::App for UiApp {
         }
 
         self.close_dialog(ctx, p);
+        self.window_dialog(ctx, p);
 
         egui::CentralPanel::default().frame(Frame::new().fill(p.content)).show(ctx, |ui| match self.stage {
             Stage::List => self.app_list(ui, p),
@@ -607,6 +614,10 @@ impl UiApp {
                         }
                         if ui.button("Unclaimed folders").on_hover_text("Program folders that no installed program claims").clicked() {
                             self.start_orphans(ui.ctx());
+                            ui.close_menu();
+                        }
+                        if ui.button("Pick from open windows").on_hover_text("Find the program behind a window").clicked() {
+                            self.open_window_picker();
                             ui.close_menu();
                         }
                     });
@@ -714,6 +725,15 @@ impl UiApp {
         }
         ui.painter().hline(hr.x_range(), hr.bottom() - 0.5, Stroke::new(1.0, p.divider));
 
+        if let Some(n) = self.list_notice.clone() {
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                ui.label(RichText::new(n).color(p.error_text));
+                if ui.small_button("Dismiss").clicked() {
+                    self.list_notice = None;
+                }
+            });
+        }
         if self.filtered.is_empty() {
             let msg = if self.loading { "Reading programs" } else { "No matching programs" };
             ui.add_space(24.0);
@@ -961,6 +981,66 @@ impl UiApp {
             )
             .wrap(),
         );
+    }
+}
+
+// ---------------------------------------------------------------- window picker
+
+impl UiApp {
+    fn open_window_picker(&mut self) {
+        let me = std::process::id();
+        let mut list: Vec<(String, PathBuf)> = procs::top_windows()
+            .into_iter()
+            .filter(|(_, pid, _)| *pid != me)
+            .filter_map(|(_, pid, title)| procs::exe_path(pid).map(|exe| (title, exe)))
+            .collect();
+        list.sort_by_cached_key(|(t, _)| t.to_lowercase());
+        list.dedup();
+        self.window_picker = Some(list);
+    }
+
+    fn window_dialog(&mut self, ctx: &egui::Context, p: &Pal) {
+        let Some(list) = &self.window_picker else { return };
+        let mut picked = None;
+        let mut cancel = false;
+        let modal = egui::Modal::new(egui::Id::new("window-picker")).show(ctx, |ui| {
+            ui.set_width(520.0);
+            ui.label(RichText::new("Pick a window").size(20.0).color(p.text));
+            ui.add_space(4.0);
+            ui.label(RichText::new("Tracewipe selects the installed program it belongs to.").color(p.weak));
+            ui.add_space(8.0);
+            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                for (title, exe) in list {
+                    let name = exe.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                    if ui.add(egui::Button::new(format!("{title}  ({name})")).frame(false)).clicked() {
+                        picked = Some(exe.clone());
+                    }
+                }
+            });
+            ui.add_space(8.0);
+            if ui.add(egui::Button::new("Cancel").min_size(Vec2::new(0.0, 28.0))).clicked() {
+                cancel = true;
+            }
+        });
+        if modal.should_close() {
+            cancel = true;
+        }
+        if let Some(exe) = picked {
+            self.window_picker = None;
+            match apps::owner_of(&self.apps, &exe) {
+                Some(i) => {
+                    self.search.clear();
+                    self.filter = Filter::All;
+                    self.dirty = true;
+                    self.click_row(i, false, false);
+                    self.reveal_selected = true;
+                    self.list_notice = None;
+                }
+                None => self.list_notice = Some(format!("No installed program owns {}", exe.display())),
+            }
+        } else if cancel {
+            self.window_picker = None;
+        }
     }
 }
 

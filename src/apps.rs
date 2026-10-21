@@ -132,6 +132,20 @@ impl App {
     }
 }
 
+/// The program whose folder holds `exe`. The deepest folder wins, so a game
+/// inside Steam's folder resolves to the game.
+pub fn owner_of(apps: &[App], exe: &Path) -> Option<usize> {
+    let e = exe.to_string_lossy().to_lowercase();
+    apps.iter()
+        .enumerate()
+        .filter_map(|(i, a)| {
+            let l = a.location.as_ref()?.to_string_lossy().trim_end_matches('\\').to_lowercase();
+            e.starts_with(&format!("{l}\\")).then_some((i, l.len()))
+        })
+        .max_by_key(|(_, len)| *len)
+        .map(|(i, _)| i)
+}
+
 pub fn is_guid(s: &str) -> bool {
     let b = s.as_bytes();
     b.len() == 38 && b[0] == b'{' && b[37] == b'}' && b[1..37].iter().all(|c| c.is_ascii_hexdigit() || *c == b'-')
@@ -366,6 +380,39 @@ mod tests {
         assert!(a.broken(), "the uninstaller path does not exist");
         a.uninstall = Some(format!("\"{}\" /x", std::env::current_exe().unwrap().display()));
         assert!(!a.broken());
+    }
+
+    #[test]
+    fn deepest_folder_owns_the_exe() {
+        let mut steam = test_app("Steam");
+        steam.location = Some(PathBuf::from(r"C:\Steam"));
+        let mut game = test_app("Game");
+        game.location = Some(PathBuf::from(r"C:\Steam\steamapps\common\Game"));
+        let apps = vec![steam, game];
+        assert_eq!(owner_of(&apps, Path::new(r"C:\Steam\steamapps\common\Game\game.exe")), Some(1));
+        assert_eq!(owner_of(&apps, Path::new(r"C:\Steam\steam.exe")), Some(0));
+        assert_eq!(owner_of(&apps, Path::new(r"C:\SteamTools\x.exe")), None);
+    }
+
+    fn test_app(name: &str) -> App {
+        App {
+            name: name.into(),
+            version: String::new(),
+            publisher: String::new(),
+            install_date: String::new(),
+            size_kb: 0,
+            location: None,
+            location_guessed: false,
+            uninstall: None,
+            quiet_uninstall: None,
+            msi: false,
+            hive: Hive::Hklm,
+            view: View::V64,
+            key_name: name.into(),
+            installer: Installer::Unknown,
+            source: Source::Registry,
+            icon: None,
+        }
     }
 
     #[test]
